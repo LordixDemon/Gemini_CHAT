@@ -92,7 +92,7 @@ export class BridgeServer extends EventEmitter {
       geminiDir: opts.geminiDir,
       acpIdleTimeoutMs: opts.acpIdleTimeoutMs,
       stateDir: this.auth.stateDir,
-      isSessionStopped: (sid) => Boolean(this.approvals?._isConversationStopped(sid)),
+      isSessionStopped: (sid) => Boolean(this.approvals?.isConversationStopped(sid)),
       onTurnActivity: () => {
         if (this._acpScanTimer) return;
         this._acpScanTimer = setTimeout(() => {

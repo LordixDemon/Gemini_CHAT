@@ -26,10 +26,16 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSCameraUsageDescription</key>
 	<string>Camera access is used to scan the Antigravity Remote pairing QR code.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Local network access connects your device directly to Antigravity Bridge on your PC.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_agy-remote._tcp</string>
+	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>

@@ -63,14 +63,21 @@ export class ApprovalGate extends EventEmitter {
     }
   }
 
-  _isConversationStopped(conversationId = '') {
+  isConversationStopped(conversationId = '') {
     const now = Date.now();
     for (const [k, exp] of this.stoppedConversations.entries()) {
       if (exp <= now) {
         this.stoppedConversations.delete(k);
       }
     }
-    return this.stoppedConversations.has('*') || (Boolean(conversationId) && this.stoppedConversations.has(conversationId));
+    return (
+      this.stoppedConversations.has('*') ||
+      (Boolean(conversationId) && this.stoppedConversations.has(conversationId))
+    );
+  }
+
+  _isConversationStopped(conversationId = '') {
+    return this.isConversationStopped(conversationId);
   }
 
   listPending() {

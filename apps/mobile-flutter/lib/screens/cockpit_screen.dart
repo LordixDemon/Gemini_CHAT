@@ -132,7 +132,7 @@ class _CockpitScreenState extends State<CockpitScreen> {
                     onTap: () {
                       HapticFeedback.lightImpact();
                       ctrl.setApprovalMode(opt.$1);
-                      setState(() {});
+                      if (mounted) setState(() {});
                       Navigator.pop(ctx);
                     },
                   ),
@@ -292,13 +292,15 @@ class _CockpitScreenState extends State<CockpitScreen> {
                               isLive
                                   ? '${ctrl.activeTransport}$latencyTag'
                                   : (ctrl.sessions.isNotEmpty
-                                      ? 'Офлайн-кэш · Переподключение…'
-                                      : 'Переподключение…'),
+                                        ? 'Офлайн-кэш · Переподключение…'
+                                        : 'Переподключение…'),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
                                 fontSize: 11.5,
-                                color: isLive ? TelemetryColors.textSecondary : TelemetryColors.warn,
+                                color: isLive
+                                    ? TelemetryColors.textSecondary
+                                    : TelemetryColors.warn,
                               ),
                             ),
                           ),
@@ -340,11 +342,7 @@ class _CockpitScreenState extends State<CockpitScreen> {
                     const SizedBox(width: 5),
                     Text(
                       modeLabel,
-                      style: TextStyle(
-                        color: modeColor,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
+                      style: TextStyle(color: modeColor, fontSize: 12, fontWeight: FontWeight.w600),
                     ),
                   ],
                 ),
@@ -353,7 +351,11 @@ class _CockpitScreenState extends State<CockpitScreen> {
           ),
           IconButton(
             tooltip: 'Сменить компьютер',
-            icon: const Icon(Icons.power_settings_new_rounded, size: 20, color: TelemetryColors.textSecondary),
+            icon: const Icon(
+              Icons.power_settings_new_rounded,
+              size: 20,
+              color: TelemetryColors.textSecondary,
+            ),
             onPressed: ctrl.disconnect,
           ),
           const SizedBox(width: 4),
@@ -600,8 +602,7 @@ class _ModeOptionTile extends StatelessWidget {
                   ],
                 ),
               ),
-              if (selected)
-                Icon(Icons.check_circle_rounded, color: accent, size: 20),
+              if (selected) Icon(Icons.check_circle_rounded, color: accent, size: 20),
             ],
           ),
         ),

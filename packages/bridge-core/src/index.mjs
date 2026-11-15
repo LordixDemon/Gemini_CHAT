@@ -8,6 +8,8 @@ import { AuthManager, defaultStateDir, discoverLanAddresses, runtimeDiscoveryPat
 import { BrainWatcher } from './brain-watcher.mjs';
 import { AcpSessionRunner } from './acp-runner.mjs';
 import { AgentDriver } from './agent-driver.mjs';
+import { HostRegistry } from './host-registry.mjs';
+import { WorkspaceOps } from './workspace-ops.mjs';
 import { ApprovalGate } from './approval-gate.mjs';
 import { ChangeTracker, computeUnifiedTextDiff } from './change-tracker.mjs';
 import { CloudflareConnector } from './cloudflare-connector.mjs';
@@ -32,6 +34,8 @@ export {
   BrainWatcher,
   AcpSessionRunner,
   AgentDriver,
+  HostRegistry,
+  WorkspaceOps,
   ApprovalGate,
   ChangeTracker,
   computeUnifiedTextDiff,

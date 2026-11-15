@@ -14,6 +14,8 @@ import {
   BrainWatcher,
   ChangeTracker,
   CloudflareConnector,
+  HostRegistry,
+  WorkspaceOps,
   applyCorsHeaders,
   computeUnifiedTextDiff,
   discoverLanAddresses,
@@ -1383,6 +1385,54 @@ test('BrainWatcher + chat.stop persist idle state, ignore orphan background task
     // 5. Deleting a brain directory prunes it from `listSessions()`
     rmSync(join(brainRoot, cidOrphan), { recursive: true, force: true });
     assert.equal(brain.listSessions().some((s) => s.id === cidOrphan), false);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('HostRegistry, WorkspaceOps, and ApprovalGate.isConversationStopped work standalone', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'agy-refactor-units-'));
+  try {
+    const wsDir = join(tmp, 'demo-project');
+    mkdirSync(wsDir, { recursive: true });
+
+    const registry = new HostRegistry({
+      stateDir: join(tmp, 'state'),
+      agentApiPath: 'agentapi',
+    });
+    const registered = registry.registerHookContext({
+      conversationId: 'conv_unit',
+      cwd: wsDir,
+      __hostContext: {
+        lsAddress: '127.0.0.1:59999',
+        csrfToken: 'csrf_demo',
+      },
+    });
+    assert.equal(registered, true);
+    assert.equal(registry.getSummary().hosts.length, 1);
+    assert.ok(registry.listWorkspaces(wsDir).some((w) => w.path === wsDir && w.isDefault));
+
+    const reloaded = new HostRegistry({
+      stateDir: join(tmp, 'state'),
+      agentApiPath: 'agentapi',
+    });
+    assert.equal(reloaded.getSummary().hosts.length, 1);
+
+    const ops = new WorkspaceOps({ getDefaultWorkspace: () => wsDir });
+    const saved = ops.saveUploadedFile({
+      fileName: '../evil_name.txt',
+      base64Data: Buffer.from('hello world', 'utf-8').toString('base64'),
+      workspacePath: wsDir,
+    });
+    assert.equal(saved.fileName, 'evil_name.txt');
+    assert.equal(existsSync(saved.savedPath), true);
+
+    const gate = new ApprovalGate({ getMode: () => 'observe', hasActiveMobileClients: () => false });
+    assert.equal(gate.isConversationStopped('conv_unit'), false);
+    gate.requestStop('conv_unit');
+    assert.equal(gate.isConversationStopped('conv_unit'), true);
+    gate.clearStop('conv_unit');
+    assert.equal(gate.isConversationStopped('conv_unit'), false);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

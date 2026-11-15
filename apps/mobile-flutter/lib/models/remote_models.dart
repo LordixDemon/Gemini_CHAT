@@ -111,26 +111,26 @@ class SavedMachine {
   }
 
   Map<String, dynamic> toJson() => {
-        'machineId': machineId,
-        'machineName': machineName,
-        'lanUrl': lanUrl,
-        'cloudflareUrl': cloudflareUrl,
-        'sessionId': sessionId,
-        'deviceToken': deviceToken,
-        'edgeDeviceToken': edgeDeviceToken,
-        'lastConnectedAtMs': lastConnectedAtMs,
-      };
+    'machineId': machineId,
+    'machineName': machineName,
+    'lanUrl': lanUrl,
+    'cloudflareUrl': cloudflareUrl,
+    'sessionId': sessionId,
+    'deviceToken': deviceToken,
+    'edgeDeviceToken': edgeDeviceToken,
+    'lastConnectedAtMs': lastConnectedAtMs,
+  };
 
   factory SavedMachine.fromJson(Map<String, dynamic> json) => SavedMachine(
-        machineId: (json['machineId'] ?? '').toString(),
-        machineName: (json['machineName'] ?? 'Antigravity PC').toString(),
-        lanUrl: (json['lanUrl'] ?? '').toString(),
-        cloudflareUrl: (json['cloudflareUrl'] ?? '').toString(),
-        sessionId: (json['sessionId'] ?? '').toString(),
-        deviceToken: (json['deviceToken'] ?? '').toString(),
-        edgeDeviceToken: (json['edgeDeviceToken'] ?? '').toString(),
-        lastConnectedAtMs: (json['lastConnectedAtMs'] as num?)?.toInt() ?? 0,
-      );
+    machineId: (json['machineId'] ?? '').toString(),
+    machineName: (json['machineName'] ?? 'Antigravity PC').toString(),
+    lanUrl: (json['lanUrl'] ?? '').toString(),
+    cloudflareUrl: (json['cloudflareUrl'] ?? '').toString(),
+    sessionId: (json['sessionId'] ?? '').toString(),
+    deviceToken: (json['deviceToken'] ?? '').toString(),
+    edgeDeviceToken: (json['edgeDeviceToken'] ?? '').toString(),
+    lastConnectedAtMs: (json['lastConnectedAtMs'] as num?)?.toInt() ?? 0,
+  );
 }
 
 class SessionSummary {
@@ -157,28 +157,28 @@ class SessionSummary {
   });
 
   SessionSummary copyWith({String? status, String? lastActivity}) => SessionSummary(
-        id: id,
-        title: title,
-        status: status ?? this.status,
-        stepCount: stepCount,
-        lastActivity: lastActivity ?? this.lastActivity,
-        artifactCount: artifactCount,
-        updatedAtMs: updatedAtMs,
-        workspaceHint: workspaceHint,
-        workspaceName: workspaceName,
-      );
+    id: id,
+    title: title,
+    status: status ?? this.status,
+    stepCount: stepCount,
+    lastActivity: lastActivity ?? this.lastActivity,
+    artifactCount: artifactCount,
+    updatedAtMs: updatedAtMs,
+    workspaceHint: workspaceHint,
+    workspaceName: workspaceName,
+  );
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'title': title,
-        'status': status,
-        'stepCount': stepCount,
-        'lastActivity': lastActivity,
-        'artifactCount': artifactCount,
-        'updatedAtMs': updatedAtMs,
-        'workspaceHint': workspaceHint,
-        'workspaceName': workspaceName,
-      };
+    'id': id,
+    'title': title,
+    'status': status,
+    'stepCount': stepCount,
+    'lastActivity': lastActivity,
+    'artifactCount': artifactCount,
+    'updatedAtMs': updatedAtMs,
+    'workspaceHint': workspaceHint,
+    'workspaceName': workspaceName,
+  };
 
   factory SessionSummary.fromJson(Map<String, dynamic> json) {
     final hint = (json['workspaceHint'] ?? '').toString();
@@ -216,13 +216,34 @@ class WorkspaceInfo {
     this.sessionCount = 0,
   });
 
+  WorkspaceInfo copyWith({bool? isDefault, bool? isOpenInHost, int? sessionCount}) => WorkspaceInfo(
+    path: path,
+    name: name,
+    isDefault: isDefault ?? this.isDefault,
+    isOpenInHost: isOpenInHost ?? this.isOpenInHost,
+    sessionCount: sessionCount ?? this.sessionCount,
+  );
+
+  WorkspaceInfo copyWith({
+    bool? isDefault,
+    bool? isOpenInHost,
+    int? sessionCount,
+  }) =>
+      WorkspaceInfo(
+        path: path,
+        name: name,
+        isDefault: isDefault ?? this.isDefault,
+        isOpenInHost: isOpenInHost ?? this.isOpenInHost,
+        sessionCount: sessionCount ?? this.sessionCount,
+      );
+
   Map<String, dynamic> toJson() => {
-        'path': path,
-        'name': name,
-        'isDefault': isDefault,
-        'isOpenInHost': isOpenInHost,
-        'sessionCount': sessionCount,
-      };
+    'path': path,
+    'name': name,
+    'isDefault': isDefault,
+    'isOpenInHost': isOpenInHost,
+    'sessionCount': sessionCount,
+  };
 
   factory WorkspaceInfo.fromJson(Map<String, dynamic> json) {
     final rawPath = (json['path'] ?? '').toString();
@@ -318,11 +339,11 @@ class ToolCallInfo {
   });
 
   Map<String, dynamic> toJson() => {
-        'name': name,
-        'summary': summary,
-        if (artifactFileName != null) 'artifactFileName': artifactFileName,
-        if (artifactSummary != null) 'artifactSummary': artifactSummary,
-      };
+    'name': name,
+    'summary': summary,
+    if (artifactFileName != null) 'artifactFileName': artifactFileName,
+    if (artifactSummary != null) 'artifactSummary': artifactSummary,
+  };
 
   factory ToolCallInfo.fromJson(Map<String, dynamic> json) {
     final artFile = json['artifactFileName']?.toString().trim();
@@ -337,6 +358,8 @@ class ToolCallInfo {
 }
 
 class AgentStep {
+  static const int optimisticStepIndex = 999999;
+
   final int seq;
   final int stepIndex;
   final String role;
@@ -357,24 +380,50 @@ class AgentStep {
     required this.toolCalls,
   }) : seq = seq ?? stepIndex;
 
+  bool get isOptimistic => stepIndex == optimisticStepIndex;
+
+  AgentStep copyWith({String? status}) => AgentStep(
+    seq: seq,
+    stepIndex: stepIndex,
+    role: role,
+    status: status ?? this.status,
+    source: source,
+    thinking: thinking,
+    content: content,
+    toolCalls: toolCalls,
+  );
+
+  bool get isOptimistic => stepIndex == optimisticStepIndex;
+
+  AgentStep copyWith({String? status}) => AgentStep(
+        seq: seq,
+        stepIndex: stepIndex,
+        role: role,
+        status: status ?? this.status,
+        source: source,
+        thinking: thinking,
+        content: content,
+        toolCalls: toolCalls,
+      );
+
   Map<String, dynamic> toJson() => {
-        'seq': seq,
-        'stepIndex': stepIndex,
-        'role': role,
-        'status': status,
-        'source': source,
-        'thinking': thinking,
-        'content': content,
-        'toolCalls': toolCalls.map((t) => t.toJson()).toList(),
-      };
+    'seq': seq,
+    'stepIndex': stepIndex,
+    'role': role,
+    'status': status,
+    'source': source,
+    'thinking': thinking,
+    'content': content,
+    'toolCalls': toolCalls.map((t) => t.toJson()).toList(),
+  };
 
   factory AgentStep.fromJson(Map<String, dynamic> json) {
     final rawTools = json['toolCalls'];
     final tools = rawTools is List
         ? rawTools
-            .whereType<Map>()
-            .map((e) => ToolCallInfo.fromJson(Map<String, dynamic>.from(e)))
-            .toList()
+              .whereType<Map>()
+              .map((e) => ToolCallInfo.fromJson(Map<String, dynamic>.from(e)))
+              .toList()
         : <ToolCallInfo>[];
     final stepIdx = (json['stepIndex'] as num?)?.toInt() ?? 0;
     final seqVal = (json['seq'] as num?)?.toInt() ?? stepIdx;
@@ -397,15 +446,12 @@ class ArtifactInfo {
 
   const ArtifactInfo({required this.fileName, required this.sizeBytes});
 
-  Map<String, dynamic> toJson() => {
-        'fileName': fileName,
-        'sizeBytes': sizeBytes,
-      };
+  Map<String, dynamic> toJson() => {'fileName': fileName, 'sizeBytes': sizeBytes};
 
   factory ArtifactInfo.fromJson(Map<String, dynamic> json) => ArtifactInfo(
-        fileName: (json['fileName'] ?? '').toString(),
-        sizeBytes: (json['sizeBytes'] as num?)?.toInt() ?? 0,
-      );
+    fileName: (json['fileName'] ?? '').toString(),
+    sizeBytes: (json['sizeBytes'] as num?)?.toInt() ?? 0,
+  );
 }
 
 class ApprovalRequest {
@@ -436,8 +482,8 @@ class ApprovalRequest {
       summary: (json['summary'] ?? '').toString(),
       commandLine: (args['CommandLine'] ?? args['Path'] ?? json['summary'] ?? '').toString(),
       cwd: (json['cwd'] ?? '').toString(),
-      expiresAtMs: (json['expiresAt'] as num?)?.toInt() ??
-          (DateTime.now().millisecondsSinceEpoch + 45000),
+      expiresAtMs:
+          (json['expiresAt'] as num?)?.toInt() ?? (DateTime.now().millisecondsSinceEpoch + 45000),
     );
   }
 }
@@ -449,9 +495,9 @@ class GitFileChange {
   const GitFileChange({required this.status, required this.path});
 
   factory GitFileChange.fromJson(Map<String, dynamic> json) => GitFileChange(
-        status: (json['status'] ?? 'M').toString(),
-        path: (json['path'] ?? '').toString(),
-      );
+    status: (json['status'] ?? 'M').toString(),
+    path: (json['path'] ?? '').toString(),
+  );
 }
 
 class PendingFileChange {
@@ -472,11 +518,11 @@ class PendingFileChange {
   });
 
   factory PendingFileChange.fromJson(Map<String, dynamic> json) => PendingFileChange(
-        path: (json['path'] ?? '').toString(),
-        status: (json['status'] ?? 'MOD').toString(),
-        additions: (json['additions'] as num?)?.toInt() ?? 0,
-        deletions: (json['deletions'] as num?)?.toInt() ?? 0,
-        conversationId: (json['conversationId'] ?? '').toString(),
-        updatedAtMs: (json['updatedAt'] as num?)?.toInt() ?? 0,
-      );
+    path: (json['path'] ?? '').toString(),
+    status: (json['status'] ?? 'MOD').toString(),
+    additions: (json['additions'] as num?)?.toInt() ?? 0,
+    deletions: (json['deletions'] as num?)?.toInt() ?? 0,
+    conversationId: (json['conversationId'] ?? '').toString(),
+    updatedAtMs: (json['updatedAt'] as num?)?.toInt() ?? 0,
+  );
 }

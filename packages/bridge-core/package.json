@@ -1,0 +1,13 @@
+{
+  "name": "@agy-remote/bridge-core",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./src/index.mjs",
+  "bin": {
+    "agy-bridge": "./bin/agy-bridge.mjs"
+  },
+  "dependencies": {
+    "@agy-remote/protocol": "1.0.0"
+  }
+}
+

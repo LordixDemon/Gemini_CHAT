@@ -1,0 +1,19 @@
+name = "antigravity-remote-edge"
+main = "src/index.ts"
+compatibility_date = "2025-02-01"
+
+[durable_objects]
+bindings = [
+  { name = "SESSION_ROOMS", class_name = "SessionRoomDO" }
+]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SessionRoomDO"]
+
+[vars]
+PROTOCOL_VERSION = "arp.v1"
+# For production, set secrets via:
+#   npx wrangler secret put HOST_AUTH_SECRET
+#   npx wrangler secret put EDGE_SIGNING_SECRET
+

@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#090D14">
+  <link rel="manifest" href="/manifest.json">
+  <title>Antigravity Remote</title>
+  <link rel="stylesheet" href="/client/styles.css">
+</head>
+<body>
+  <div id="app" class="shell">
+    <!-- Top Link Telemetry Header -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <span id="connDot" class="dot dot-warn"></span>
+        <div>
+          <div id="hostTitle" class="host-title">Antigravity Remote</div>
+          <div id="connMeta" class="conn-meta">Подключение…</div>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <button id="approvalModeBtn" class="chip-btn" title="Режим проверки тулов">Ask Phone</button>
+      </div>
+    </header>
+
+    <!-- Pairing View (shown only when unauthenticated) -->
+    <main id="pairView" class="pair-view hidden">
+      <div class="pair-card">
+        <h1>Подключение к ПК</h1>
+        <p class="muted">Введите 6-значный PIN с панели Antigravity Remote в IDE или отсканируйте QR-код заново.</p>
+        <form id="pairForm">
+          <input id="pinInput" type="text" inputmode="numeric" maxlength="7" placeholder="000 000" autocomplete="one-time-code" required>
+          <input id="deviceNameInput" type="text" maxlength="40" placeholder="Имя телефона (например, Pixel / iPhone)">
+          <button type="submit" class="btn-primary full">Связать устройство</button>
+        </form>
+        <div id="pairError" class="error-box hidden"></div>
+      </div>
+    </main>
+
+    <!-- Main Authenticated Cockpit -->
+    <main id="cockpitView" class="cockpit hidden">
+      <!-- Navigation Tabs -->
+      <nav class="nav-tabs" role="tablist">
+        <button class="tab active" data-tab="sessions">Сессии <span id="sessCount" class="badge">0</span></button>
+        <button class="tab" data-tab="chat">Агент</button>
+        <button class="tab" data-tab="workspace">Diff &amp; Git <span id="diffCount" class="badge">0</span></button>
+        <button class="tab" data-tab="terminal">Терминал</button>
+      </nav>
+
+      <!-- Tab 1: Sessions List -->
+      <section id="tab-sessions" class="tab-panel active">
+        <div class="panel-toolbar">
+          <button id="newSessionBtn" class="btn-primary sm">+ Новая задача</button>
+          <button id="refreshSessionsBtn" class="btn-ghost sm">Обновить</button>
+        </div>
+        <div id="sessionsList" class="list-stack"></div>
+      </section>
+
+      <!-- Tab 2: Live Conversation & Agent Stream -->
+      <section id="tab-chat" class="tab-panel chat-layout">
+        <div id="chatHeader" class="chat-subheader">Выберите сессию или создайте новую</div>
+        <div id="stepsStream" class="steps-stream"></div>
+
+        <!-- Quick Slash Chips -->
+        <div class="slash-strip">
+          <button class="slash-chip" data-slash="/plan ">/plan</button>
+          <button class="slash-chip" data-slash="/boost ">/boost</button>
+          <button class="slash-chip" data-slash="/compact">/compact</button>
+          <button class="slash-chip" data-slash="Запусти тесты и проверь ошибки">Проверить тесты</button>
+        </div>
+
+        <form id="chatForm" class="composer">
+          <textarea id="promptInput" rows="1" placeholder="Инструкция для Antigravity…"></textarea>
+          <button type="submit" class="send-btn" aria-label="Отправить">Отправить</button>
+        </form>
+      </section>
+
+      <!-- Tab 3: Workspace Git Status & Diffs -->
+      <section id="tab-workspace" class="tab-panel">
+        <div class="panel-toolbar">
+          <span id="gitBranchLabel" class="mono-tag">main</span>
+          <button id="refreshGitBtn" class="btn-ghost sm">Обновить Git</button>
+        </div>
+        <div id="gitFilesList" class="list-stack"></div>
+        <div id="diffViewer" class="diff-viewer hidden"></div>
+      </section>
+
+      <!-- Tab 4: Quick Remote Terminal -->
+      <section id="tab-terminal" class="tab-panel chat-layout">
+        <div class="slash-strip">
+          <button class="cmd-chip" data-cmd="git status">git status</button>
+          <button class="cmd-chip" data-cmd="npm test">npm test</button>
+          <button class="cmd-chip" data-cmd="flutter analyze">flutter analyze</button>
+        </div>
+        <pre id="termOutput" class="term-output"># Удалённый терминал рабочей папки ПК</pre>
+        <form id="termForm" class="composer">
+          <input id="cmdInput" type="text" class="mono-input" placeholder="Команда (например, git diff --stat)">
+          <button type="submit" class="send-btn">Run</button>
+        </form>
+      </section>
+
+      <!-- Native Antigravity-style Pending File Changes Bar ("Сохранить всё") -->
+      <section id="pendingChangesBar" class="changes-bar hidden" aria-live="polite">
+        <div class="changes-summary-row">
+          <button id="toggleChangesListBtn" type="button" class="changes-toggle-btn">
+            <span id="pendingChangesCount" class="changes-count-badge">0</span>
+            <span class="changes-label">Изменённые файлы</span>
+            <span id="pendingChangesStats" class="changes-stats"></span>
+          </button>
+          <div class="changes-actions">
+            <button id="revertAllPwaBtn" type="button" class="btn-danger sm">Откатить</button>
+            <button id="saveAllPwaBtn" type="button" class="btn-live sm">Сохранить всё</button>
+          </div>
+        </div>
+        <div id="pendingChangesDrawer" class="changes-drawer hidden">
+          <div id="pendingChangesList" class="list-stack"></div>
+          <div id="pendingChangesDiff" class="diff-viewer hidden"></div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Urgent PreToolUse Approval Gate Drawer -->
+    <aside id="approvalSheet" class="approval-sheet hidden" aria-live="assertive">
+      <div class="approval-inner">
+        <div class="approval-head">
+          <span id="approvalTitlePill" class="gate-pill">Запрос разрешения тула</span>
+          <span id="approvalTimer" class="mono-tag">45s</span>
+        </div>
+        <div id="approvalToolName" class="approval-tool">run_command</div>
+        <pre id="approvalSummary" class="approval-code"></pre>
+        <div id="approvalQueueList" class="approval-queue-list hidden"></div>
+        <div id="approvalCwd" class="approval-cwd muted"></div>
+        <div class="approval-actions">
+          <button id="btnDenyTool" class="btn-danger">Заблокировать</button>
+          <button id="btnAllowSession" class="btn-ghost">Разрешать в сессии</button>
+          <button id="btnAllowOnce" class="btn-live">Разрешить</button>
+        </div>
+      </div>
+    </aside>
+
+    <div id="toastBox" class="toast-box"></div>
+  </div>
+  <script src="/client/app.js"></script>
+</body>
+</html>
+

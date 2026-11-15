@@ -1,0 +1,10 @@
+{
+  "name": "Antigravity Remote",
+  "short_name": "AGY Remote",
+  "start_url": "/app",
+  "display": "standalone",
+  "background_color": "#090D14",
+  "theme_color": "#090D14",
+  "description": "Mobile Remote Control for Google Antigravity sessions"
+}
+

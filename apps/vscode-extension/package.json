@@ -1,0 +1,88 @@
+{
+  "name": "antigravity-remote-vscode",
+  "displayName": "Antigravity Remote Control",
+  "description": "Remote control Google Antigravity sessions from mobile (LAN & Cloudflare Edge) — Claude Code / Codex style.",
+  "version": "1.0.0",
+  "publisher": "antigravity-remote",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onView:antigravityRemote.sidebarView"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "antigravityRemoteContainer",
+          "title": "Antigravity Remote",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "antigravityRemoteContainer": [
+        {
+          "type": "webview",
+          "id": "antigravityRemote.sidebarView",
+          "name": "Remote Control"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "antigravityRemote.openPanel",
+        "title": "Antigravity Remote: Open Control Panel & QR Code"
+      },
+      {
+        "command": "antigravityRemote.rotatePin",
+        "title": "Antigravity Remote: Rotate Pairing PIN & QR"
+      },
+      {
+        "command": "antigravityRemote.setApprovalMode",
+        "title": "Antigravity Remote: Switch Mobile Approval Mode"
+      },
+      {
+        "command": "antigravityRemote.configureCloudflare",
+        "title": "Antigravity Remote: Configure Cloudflare Edge / Tunnel"
+      }
+    ],
+    "configuration": {
+      "title": "Antigravity Remote",
+      "properties": {
+        "antigravityRemote.port": {
+          "type": "number",
+          "default": 7443,
+          "description": "Local LAN port for Antigravity Remote Bridge."
+        },
+        "antigravityRemote.approvalMode": {
+          "type": "string",
+          "enum": [
+            "observe",
+            "ask-mobile",
+            "auto-safe"
+          ],
+          "default": "ask-mobile",
+          "description": "How PreToolUse hooks handle remote tool approvals when mobile devices are connected."
+        },
+        "antigravityRemote.cloudflareEdgeUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Optional Cloudflare Workers + Durable Objects relay base URL (e.g. https://agy-remote.your-subdomain.workers.dev)."
+        },
+        "antigravityRemote.cloudflareEdgeSecret": {
+          "type": "string",
+          "default": "",
+          "description": "Shared host secret for authenticating with Cloudflare Edge Relay."
+        }
+      }
+    }
+  }
+}
+

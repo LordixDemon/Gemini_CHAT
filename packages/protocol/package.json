@@ -1,0 +1,11 @@
+{
+  "name": "@agy-remote/protocol",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./src/index.mjs",
+  "exports": {
+    ".": "./src/index.mjs",
+    "./qr": "./src/qr-svg.mjs"
+  }
+}
+

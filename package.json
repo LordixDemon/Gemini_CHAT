@@ -1,0 +1,36 @@
+{
+  "name": "antigravity-remote-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Remote Control system for Google Antigravity (LAN + Cloudflare Edge + Native AGY Plugin + VS Code Extension + Flutter Mobile App)",
+  "workspaces": [
+    "packages/*",
+    "apps/vscode-extension",
+    "apps/cloudflare-edge"
+  ],
+  "scripts": {
+    "build:qr": "node scripts/build-qr-encoder.mjs",
+    "build:vscode": "node scripts/build-vscode.mjs",
+    "package:vscode": "node scripts/install-vscode-extension.mjs --package-only",
+    "install:vscode": "node scripts/install-vscode-extension.mjs",
+    "build:plugin": "node scripts/install-agy-plugin.mjs --local-only",
+    "install:plugin": "node scripts/install-agy-plugin.mjs",
+    "install:all": "npm run build && npm run install:plugin && npm run install:vscode",
+    "typecheck:edge": "tsc -p apps/cloudflare-edge/tsconfig.json --noEmit",
+    "typecheck:vscode": "tsc -p apps/vscode-extension/tsconfig.json --noEmit",
+    "build": "npm run build:qr && npm run typecheck:vscode && npm run build:vscode && npm run typecheck:edge && npm run build:plugin",
+    "start:bridge": "node packages/bridge-core/bin/agy-bridge.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "test:coverage": "node --test --experimental-test-coverage tests/*.test.mjs"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250214.0",
+    "@types/node": "^22.13.0",
+    "@types/qrcode": "^1.5.5",
+    "@types/vscode": "^1.96.0",
+    "esbuild": "^0.25.0",
+    "qrcode": "^1.5.4",
+    "typescript": "^5.7.3"
+  }
+}
+

@@ -1,0 +1,13 @@
+{
+  "name": "antigravity-remote",
+  "displayName": "Antigravity Remote",
+  "version": "1.0.0",
+  "description": "Remote control Antigravity sessions from mobile (LAN & Cloudflare Edge) — QR pairing, live step streaming, mobile PreToolUse approval gate, and Git diff viewer.",
+  "logo": "assets/logo.svg",
+  "suggestedPrompts": [
+    "Open the Remote Control panel and show my mobile pairing QR and PIN",
+    "Check which mobile devices are connected to Antigravity Remote",
+    "Switch mobile remote tool approval mode to auto-safe"
+  ]
+}
+

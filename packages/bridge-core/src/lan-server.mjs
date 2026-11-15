@@ -353,7 +353,7 @@ export class BridgeServer extends EventEmitter {
         formattedPin: `${pairing.pin.slice(0, 3)} ${pairing.pin.slice(3)}`,
         expiresAt: pairing.expiresAt,
         pairingUrl,
-        qrSvg: renderQrSvg(pairingUrl, { sizePx: 196, margin: 2 }),
+        qrSvg: renderQrSvg(pairingUrl, { sizePx: 220, margin: 4 }),
         qrTerminal: renderQrTerminal(pairingUrl),
       },
       settings,

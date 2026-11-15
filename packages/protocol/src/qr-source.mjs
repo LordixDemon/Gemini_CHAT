@@ -31,10 +31,10 @@ export function createQrMatrix(text, errorCorrectionLevel = 'M') {
  * @param {{ margin?: number, dark?: string, light?: string, ecl?: 'L'|'M'|'Q'|'H', sizePx?: number }} [opts]
  */
 export function renderQrSvg(text, opts = {}) {
-  const margin = opts.margin ?? 2;
-  const dark = opts.dark || '#F8FAFC';
-  const light = opts.light || '#090D14';
-  const sizePx = opts.sizePx || 200;
+  const margin = opts.margin ?? 4;
+  const dark = opts.dark || '#090D14';
+  const light = opts.light || '#FFFFFF';
+  const sizePx = opts.sizePx || 220;
   const { size, rows } = createQrMatrix(text, opts.ecl || 'M');
   const total = size + margin * 2;
 
@@ -55,7 +55,7 @@ export function renderQrSvg(text, opts = {}) {
 
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${total} ${total}" width="${sizePx}" height="${sizePx}" shape-rendering="crispEdges" role="img" aria-label="Pairing QR Code">`,
-    light !== 'transparent' ? `<rect width="${total}" height="${total}" rx="2" fill="${light}"/>` : '',
+    light !== 'transparent' ? `<rect width="${total}" height="${total}" rx="1.5" fill="${light}"/>` : '',
     `<path d="${pathData}" fill="${dark}"/>`,
     `</svg>`,
   ].join('');

@@ -111,12 +111,14 @@ html, body {
 }
 
 .qr-frame {
-  width: 148px;
-  height: 148px;
-  border-radius: 8px;
+  width: 164px;
+  height: 164px;
+  border-radius: 10px;
   overflow: hidden;
-  border: 1px solid var(--pane-border);
-  background: #090D14;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: #FFFFFF;
+  padding: 4px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
   display: flex;
   align-items: center;
   justify-content: center;

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 class PairingQrPayload {
@@ -7,6 +8,7 @@ class PairingQrPayload {
   final String machineName;
   final String cloudflareUrl;
   final String sessionId;
+  final bool hasPairPath;
 
   const PairingQrPayload({
     required this.baseUrl,
@@ -15,13 +17,43 @@ class PairingQrPayload {
     required this.machineName,
     required this.cloudflareUrl,
     required this.sessionId,
+    this.hasPairPath = false,
   });
+
+  bool get looksLikePairingCode =>
+      hasPairPath || token.isNotEmpty || machineId.isNotEmpty || cloudflareUrl.isNotEmpty;
 
   static PairingQrPayload? tryParse(String raw) {
     final trimmed = raw.trim();
     if (trimmed.isEmpty) return null;
+
+    if (trimmed.startsWith('{')) {
+      try {
+        final decoded = jsonDecode(trimmed);
+        if (decoded is! Map) return null;
+        final rawBase = (decoded['baseUrl'] ?? '').toString().trim();
+        final baseUri = Uri.tryParse(rawBase);
+        if (baseUri == null || !baseUri.hasScheme || baseUri.host.isEmpty) return null;
+        if (baseUri.scheme != 'http' && baseUri.scheme != 'https') return null;
+        final origin = '${baseUri.scheme}://${baseUri.authority}';
+        final machId = (decoded['machineId'] ?? '').toString();
+        return PairingQrPayload(
+          baseUrl: origin,
+          token: (decoded['token'] ?? '').toString(),
+          machineId: machId,
+          machineName: (decoded['machineName'] ?? baseUri.host).toString(),
+          cloudflareUrl: (decoded['cloudflareUrl'] ?? '').toString().replaceAll(RegExp(r'/+$'), ''),
+          sessionId: (decoded['sessionId'] ?? machId).toString(),
+          hasPairPath: true,
+        );
+      } catch (_) {
+        return null;
+      }
+    }
+
     final uri = Uri.tryParse(trimmed);
     if (uri == null || !uri.hasScheme || uri.host.isEmpty) return null;
+    if (uri.scheme != 'http' && uri.scheme != 'https') return null;
 
     final origin = '${uri.scheme}://${uri.authority}';
     return PairingQrPayload(
@@ -29,8 +61,9 @@ class PairingQrPayload {
       token: uri.queryParameters['t'] ?? '',
       machineId: uri.queryParameters['m'] ?? '',
       machineName: uri.queryParameters['n'] ?? uri.host,
-      cloudflareUrl: uri.queryParameters['cf'] ?? '',
+      cloudflareUrl: (uri.queryParameters['cf'] ?? '').replaceAll(RegExp(r'/+$'), ''),
       sessionId: uri.queryParameters['s'] ?? uri.queryParameters['m'] ?? '',
+      hasPairPath: uri.path.contains('/pair'),
     );
   }
 }

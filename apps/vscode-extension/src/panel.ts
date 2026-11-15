@@ -169,9 +169,11 @@ export class RemoteWebviewManager implements vscode.WebviewViewProvider {
     }
     .row-between { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
     .qr-box {
-      width: 156px; height: 156px; margin: 8px auto;
-      border-radius: 8px; overflow: hidden;
-      border: 1px solid var(--border); background: #090D14;
+      width: 176px; height: 176px; margin: 8px auto;
+      border-radius: 10px; overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      background: #FFFFFF; padding: 4px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
     }
     .qr-box svg { width: 100%; height: 100%; display: block; }
     .pin {

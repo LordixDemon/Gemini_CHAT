@@ -256,16 +256,23 @@ test('unquoteArg, cleanArgsObject, extractUserPrompt, and summarizeToolCall cove
   assert.equal(summarizeToolCall({ name: 'custom_tool', args: {} }), 'custom_tool');
 });
 
-test('QR encoder generates ISO 18004 matrix, crisp SVG, and Unicode terminal output', () => {
+test('QR encoder generates ISO 18004 matrix, crisp high-contrast SVG, and Unicode terminal output', () => {
   const matrix = createQrMatrix('http://192.168.1.7:7443/pair?t=abc123', 'M');
   assert.ok(matrix.size >= 21);
   assert.equal(matrix.rows.length, matrix.size);
 
+  const defaultSvg = renderQrSvg('http://192.168.1.7:7443/pair?t=abc123');
+  assert.ok(defaultSvg.startsWith('<svg '));
+  assert.ok(defaultSvg.includes('width="220"'));
+  assert.ok(defaultSvg.includes('fill="#FFFFFF"'));
+  assert.ok(defaultSvg.includes('fill="#090D14"'));
+  assert.ok(defaultSvg.includes(`viewBox="0 0 ${matrix.size + 8} ${matrix.size + 8}"`));
+  assert.ok(defaultSvg.includes('<path d="M4 4h7v1h-7z'));
+
   const svg = renderQrSvg('http://192.168.1.7:7443/pair?t=abc123', { sizePx: 180, margin: 2 });
-  assert.ok(svg.startsWith('<svg '));
   assert.ok(svg.includes('width="180"'));
   assert.ok(svg.includes('<rect '));
-  assert.ok(svg.includes('<path d="M'));
+  assert.ok(svg.includes('<path d="M2 2h7v1h-7z'));
 
   const transparentSvg = renderQrSvg('hello', { light: 'transparent' });
   assert.equal(transparentSvg.includes('<rect '), false);

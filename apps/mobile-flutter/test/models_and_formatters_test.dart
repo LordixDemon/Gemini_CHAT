@@ -21,7 +21,21 @@ void main() {
       expect(minimal, isNotNull);
       expect(minimal!.machineName, 'bridge.local');
       expect(minimal.sessionId, 'm2');
+      expect(minimal.looksLikePairingCode, isTrue);
 
+      final jsonPayload = PairingQrPayload.tryParse(
+        '{"baseUrl":"http://192.168.1.7:7443","token":"tok_json","machineId":"mach_j","machineName":"DevBox"}',
+      );
+      expect(jsonPayload, isNotNull);
+      expect(jsonPayload!.baseUrl, 'http://192.168.1.7:7443');
+      expect(jsonPayload.token, 'tok_json');
+      expect(jsonPayload.looksLikePairingCode, isTrue);
+
+      final unrelatedSite = PairingQrPayload.tryParse('https://example.org/docs');
+      expect(unrelatedSite, isNotNull);
+      expect(unrelatedSite!.looksLikePairingCode, isFalse);
+
+      expect(PairingQrPayload.tryParse('javascript:alert(1)'), isNull);
       expect(PairingQrPayload.tryParse(''), isNull);
       expect(PairingQrPayload.tryParse('   '), isNull);
       expect(PairingQrPayload.tryParse('not_a_uri'), isNull);

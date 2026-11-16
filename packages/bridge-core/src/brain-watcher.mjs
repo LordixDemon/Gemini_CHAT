@@ -18,6 +18,10 @@ import {
 } from '@agy-remote/protocol';
 
 const CONV_ID_RE = /^[a-z0-9-]{8,64}$/i;
+const SUBAGENT_ID_PATTERNS = [
+  /"conversationId"\s*:\s*"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"/gi,
+  /conversation:\/\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi,
+];
 const ARTIFACT_MAX_BYTES = 8 * 1024 * 1024; // 8 MiB for large plans & architecture docs
 const WORKSPACE_ROOT_MARKERS = [
   '.git',
@@ -54,6 +58,7 @@ export class BrainWatcher extends EventEmitter {
     this.pollIntervalMs = opts.pollIntervalMs || 900;
     this._cache = new Map();
     this._wsRootCache = new Map();
+    this._subagentIds = new Set();
     this._stoppedSessions = new Map(); // convId -> { stoppedAtMs: number, stepCount: number }
     this._timer = null;
   }
@@ -225,7 +230,13 @@ export class BrainWatcher extends EventEmitter {
           prev.fullSize === fullSize &&
           prev.artifactsKey === artifactsKey
         ) {
-          if (prev.summary.status === 'working') {
+          if (this._subagentIds.has(convId) && !prev.isSubagent) {
+            prev.isSubagent = true;
+            prev.summary = { ...prev.summary, isSubagent: true };
+            listChanged = true;
+            continue;
+          }
+          if (!prev.isSubagent && prev.summary.status === 'working') {
             const latestMtimeMs = Math.max(st.mtimeMs, fullMtimeMs || 0);
             const isStopped = this._stoppedSessions.has(convId);
             const isAgedOut = Date.now() - latestMtimeMs >= 90_000;
@@ -261,9 +272,11 @@ export class BrainWatcher extends EventEmitter {
         if (!parsed) continue;
 
         this._cache.set(convId, parsed);
-        listChanged = true;
+        if (!parsed.isSubagent || (prev && !prev.isSubagent)) {
+          listChanged = true;
+        }
 
-        if (emitEvents && prev) {
+        if (emitEvents && prev && !parsed.isSubagent) {
           const vLen = parsed.visibleSteps.length;
           const startSlice =
             vLen > 0 ? Math.max(0, Math.min(prevVisibleCount - 1, vLen - 1)) : 0;
@@ -278,11 +291,23 @@ export class BrainWatcher extends EventEmitter {
       }
     }
 
+    // Reconcile any cached parent/child subagent relationships discovered later in the same scan pass
+    for (const [cachedId, entry] of this._cache.entries()) {
+      if (this._subagentIds.has(cachedId) && !entry.isSubagent && !entry.isUserRoot) {
+        entry.isSubagent = true;
+        entry.summary = { ...entry.summary, isSubagent: true };
+        listChanged = true;
+      }
+    }
+
     for (const cachedId of [...this._cache.keys()]) {
       if (!seenConvIds.has(cachedId)) {
+        const removed = this._cache.get(cachedId);
         this._cache.delete(cachedId);
         this._stoppedSessions.delete(cachedId);
-        listChanged = true;
+        if (!removed?.isSubagent) {
+          listChanged = true;
+        }
       }
     }
 
@@ -294,6 +319,7 @@ export class BrainWatcher extends EventEmitter {
   listSessions(limit = 50) {
     this.scanNow(false);
     return [...this._cache.values()]
+      .filter((entry) => !entry.isSubagent)
       .map((entry) => entry.summary)
       .sort((a, b) => b.updatedAtMs - a.updatedAtMs)
       .slice(0, limit);
@@ -473,6 +499,26 @@ export class BrainWatcher extends EventEmitter {
     let title = '';
     let workspaceHint = '';
     let lastActivity = '';
+    let pendingSubagentOutputScan = false;
+
+    const firstObj = entries[0]?.obj;
+    const isUserRoot = Boolean(
+      firstObj &&
+        ((firstObj.type === 'USER_INPUT' &&
+          !String(firstObj.content || '').includes('[Message] timestamp=')) ||
+          Boolean(extractRemoteSystemPrompt(firstObj.content || ''))),
+    );
+    const isSubagentStart = Boolean(
+      firstObj &&
+        !isUserRoot &&
+        ((firstObj.type === 'SYSTEM_MESSAGE' || firstObj.source === 'SYSTEM') ||
+          Number(firstObj.step_index) > 0 ||
+          (firstObj.type === 'USER_INPUT' &&
+            String(firstObj.content || '').includes('[Message] timestamp='))),
+    );
+    if (isSubagentStart) {
+      this._subagentIds.add(convId);
+    }
 
     for (const { obj } of entries) {
       const type = obj.type || 'GENERIC';
@@ -532,8 +578,12 @@ export class BrainWatcher extends EventEmitter {
         }
       } else if (type === 'PLANNER_RESPONSE') {
         const rawTools = Array.isArray(obj.tool_calls) ? obj.tool_calls : [];
+        pendingSubagentOutputScan = false;
         const toolCalls = rawTools.map((tc) => {
           const cleanArgs = cleanArgsObject(tc.args);
+          if (tc.name === 'invoke_subagent') {
+            pendingSubagentOutputScan = true;
+          }
           const p =
             cleanArgs.Path ||
             cleanArgs.TargetFile ||
@@ -603,6 +653,17 @@ export class BrainWatcher extends EventEmitter {
         });
       } else {
         // Tool execution output / system event
+        if (pendingSubagentOutputScan && typeof obj.content === 'string') {
+          for (const re of SUBAGENT_ID_PATTERNS) {
+            re.lastIndex = 0;
+            let match;
+            while ((match = re.exec(obj.content)) !== null) {
+              if (match[1] && match[1] !== convId) {
+                this._subagentIds.add(match[1]);
+              }
+            }
+          }
+        }
         const snippet = typeof obj.content === 'string' ? obj.content.slice(0, 1200) : '';
         steps.push({
           seq,
@@ -653,6 +714,8 @@ export class BrainWatcher extends EventEmitter {
     const artifacts = meta.artifacts || this._listArtifacts(convDir);
     const surface = basename(join(convDir, '..', '..')); // e.g. antigravity, antigravity-ide
 
+    const isSubagent = !isUserRoot && (isSubagentStart || this._subagentIds.has(convId));
+
     const summary = {
       id: convId,
       title: title || `Session ${convId.slice(0, 8)}`,
@@ -665,12 +728,15 @@ export class BrainWatcher extends EventEmitter {
       artifactCount: artifacts.length,
       updatedAtMs: latestMtimeMs,
       updatedAt: new Date(latestMtimeMs).toISOString(),
+      isSubagent,
     };
 
     const visibleSteps = steps.filter((s) => s.role !== 'tool_result');
 
     return {
       convDir,
+      isUserRoot,
+      isSubagent,
       mtimeMs: st.mtimeMs,
       size: st.size,
       fullMtimeMs: meta.fullMtimeMs || 0,

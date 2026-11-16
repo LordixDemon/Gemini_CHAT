@@ -215,6 +215,18 @@ test('unquoteArg, cleanArgsObject, extractUserPrompt, and summarizeToolCall cove
     ),
     null,
   );
+  assert.equal(
+    extractRemoteSystemPrompt(
+      '<SYSTEM_MESSAGE>\n[Message] timestamp=2026-11-14T16:11:00Z sender=system priority=MESSAGE_PRIORITY_LOW content=[Notice] All your subagents and background tasks have been stopped due to server restart.\n</SYSTEM_MESSAGE>',
+    ),
+    null,
+  );
+  assert.equal(
+    extractRemoteSystemPrompt(
+      '<SYSTEM_MESSAGE>\n[Message] timestamp=2026-11-14T16:11:00Z sender=coordinator content=Audit module A\n</SYSTEM_MESSAGE>',
+    ),
+    null,
+  );
   assert.equal(extractRemoteSystemPrompt(''), null);
 
   assert.equal(summarizeToolCall(null), 'Tool call');

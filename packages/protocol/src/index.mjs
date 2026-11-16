@@ -188,8 +188,6 @@ export function extractUserPrompt(rawContent = '') {
     .trim();
 }
 
-const UUID_PREFIX_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-/i;
-
 /**
  * Extracts user prompts injected via `agentapi send-message` into Antigravity conversations,
  * which Antigravity records as `SYSTEM_MESSAGE` steps (`[Message] timestamp=... sender=system ... content=...`),
@@ -209,11 +207,11 @@ export function extractRemoteSystemPrompt(rawContent = '') {
   const body = msgMatch[2].trim();
   if (!body) return null;
 
-  // Ignore background task completions & subagent messages
+  // Only human prompts injected via `agentapi` use `sender=system`; ignore subagents, tasks, swarm peers, and system `[Notice]` alerts
   if (
-    sender.includes('/task-') ||
-    UUID_PREFIX_RE.test(sender) ||
-    /^Task id\s+"[^"]+"/i.test(body)
+    sender.toLowerCase() !== 'system' ||
+    /^Task id\s+"[^"]+"/i.test(body) ||
+    /^\[Notice\]\s/i.test(body)
   ) {
     return null;
   }

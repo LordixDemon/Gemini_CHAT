@@ -3,16 +3,18 @@
  * Uses `sidecar_sdk` (`SidecarApp`) when launched by Antigravity 2.0 / IDE,
  * with a clean standalone HTTP fallback for local testing.
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const bundledFile = join(__dirname, 'bridge-bundle.mjs');
+const initialBundleMtimeMs = existsSync(bundledFile) ? statSync(bundledFile).mtimeMs : 0;
 
 // Load bundled zero-dep BridgeCore when installed in ~/.gemini/config/plugins,
 // or workspace source during monorepo development.
-const bridgeModulePath = existsSync(join(__dirname, 'bridge-bundle.mjs'))
+const bridgeModulePath = initialBundleMtimeMs
   ? './bridge-bundle.mjs'
   : '../../../../packages/bridge-core/src/index.mjs';
 
@@ -30,6 +32,13 @@ const heartbeatTimer = setInterval(async () => {
   if (heartbeatBusy) return;
   heartbeatBusy = true;
   try {
+    if (initialBundleMtimeMs && existsSync(bundledFile)) {
+      const currentMtime = statSync(bundledFile).mtimeMs;
+      if (currentMtime !== initialBundleMtimeMs) {
+        await bridgeHandle?.server?.stop?.();
+        process.exit(75);
+      }
+    }
     await bridgeHandle.client.registerSelfHost();
   } catch {
     try {

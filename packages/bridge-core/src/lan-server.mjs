@@ -488,6 +488,14 @@ export class BridgeServer extends EventEmitter {
       return sendJson(res, 200, this.getControlStatus());
     }
 
+    if (req.method === 'POST' && pathname === '/internal/shutdown') {
+      sendJson(res, 200, { ok: true, shuttingDown: true });
+      setImmediate(() => {
+        void this.stop();
+      });
+      return;
+    }
+
     if (req.method === 'POST' && pathname === '/internal/rotate-pin') {
       const pInfo = this.auth.rotatePairing();
       void this.cloudflare.syncEdgePairing(pInfo, this.auth.getSettings().cloudflareEdgeSecret);

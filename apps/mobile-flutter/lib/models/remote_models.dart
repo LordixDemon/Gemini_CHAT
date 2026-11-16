@@ -143,6 +143,7 @@ class SessionSummary {
   final int updatedAtMs;
   final String workspaceHint;
   final String workspaceName;
+  final bool isSubagent;
 
   const SessionSummary({
     required this.id,
@@ -154,19 +155,22 @@ class SessionSummary {
     required this.updatedAtMs,
     this.workspaceHint = '',
     this.workspaceName = '',
+    this.isSubagent = false,
   });
 
-  SessionSummary copyWith({String? status, String? lastActivity}) => SessionSummary(
-    id: id,
-    title: title,
-    status: status ?? this.status,
-    stepCount: stepCount,
-    lastActivity: lastActivity ?? this.lastActivity,
-    artifactCount: artifactCount,
-    updatedAtMs: updatedAtMs,
-    workspaceHint: workspaceHint,
-    workspaceName: workspaceName,
-  );
+  SessionSummary copyWith({String? status, String? lastActivity, bool? isSubagent}) =>
+      SessionSummary(
+        id: id,
+        title: title,
+        status: status ?? this.status,
+        stepCount: stepCount,
+        lastActivity: lastActivity ?? this.lastActivity,
+        artifactCount: artifactCount,
+        updatedAtMs: updatedAtMs,
+        workspaceHint: workspaceHint,
+        workspaceName: workspaceName,
+        isSubagent: isSubagent ?? this.isSubagent,
+      );
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -178,6 +182,7 @@ class SessionSummary {
     'updatedAtMs': updatedAtMs,
     'workspaceHint': workspaceHint,
     'workspaceName': workspaceName,
+    'isSubagent': isSubagent,
   };
 
   factory SessionSummary.fromJson(Map<String, dynamic> json) {
@@ -197,6 +202,7 @@ class SessionSummary {
       updatedAtMs: (json['updatedAtMs'] as num?)?.toInt() ?? 0,
       workspaceHint: hint,
       workspaceName: wsName,
+      isSubagent: json['isSubagent'] == true,
     );
   }
 }
@@ -215,14 +221,6 @@ class WorkspaceInfo {
     this.isOpenInHost = false,
     this.sessionCount = 0,
   });
-
-  WorkspaceInfo copyWith({bool? isDefault, bool? isOpenInHost, int? sessionCount}) => WorkspaceInfo(
-    path: path,
-    name: name,
-    isDefault: isDefault ?? this.isDefault,
-    isOpenInHost: isOpenInHost ?? this.isOpenInHost,
-    sessionCount: sessionCount ?? this.sessionCount,
-  );
 
   WorkspaceInfo copyWith({
     bool? isDefault,
@@ -392,19 +390,6 @@ class AgentStep {
     content: content,
     toolCalls: toolCalls,
   );
-
-  bool get isOptimistic => stepIndex == optimisticStepIndex;
-
-  AgentStep copyWith({String? status}) => AgentStep(
-        seq: seq,
-        stepIndex: stepIndex,
-        role: role,
-        status: status ?? this.status,
-        source: source,
-        thinking: thinking,
-        content: content,
-        toolCalls: toolCalls,
-      );
 
   Map<String, dynamic> toJson() => {
     'seq': seq,

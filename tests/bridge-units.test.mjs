@@ -1437,3 +1437,235 @@ test('HostRegistry, WorkspaceOps, and ApprovalGate.isConversationStopped work st
     rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('BrainWatcher hides subagent and swarm worker trajectories while keeping desktop and mobile user sessions', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'agy-subagent-filter-'));
+  try {
+    const brainRoot = join(tmp, 'antigravity', 'brain');
+    const parentId = '11111111-1111-4111-8111-111111111111';
+    const subagentA = '22222222-2222-4222-8222-222222222222';
+    const subagentB = '33333333-3333-4333-8333-333333333333';
+    const mobileNewId = '44444444-4444-4444-8444-444444444444';
+
+    const writeTx = (cid, lines) => {
+      const dir = join(brainRoot, cid, '.system_generated', 'logs');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'transcript.jsonl'), lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+    };
+
+    writeTx(parentId, [
+      { step_index: 0, source: 'USER_EXPLICIT', type: 'USER_INPUT', content: '<USER_REQUEST>Основная сессия</USER_REQUEST>' },
+      {
+        step_index: 1,
+        source: 'MODEL',
+        type: 'PLANNER_RESPONSE',
+        content: '',
+        tool_calls: [{ name: 'invoke_subagent', args: { TypeName: '"research"', Role: '"Auditor"', Prompt: '"Check code"' } }],
+      },
+      {
+        step_index: 2,
+        source: 'MODEL',
+        type: 'GENERIC',
+        content: `Subagent launched: {"conversationId":"${subagentB}"}`,
+      },
+    ]);
+
+    // Subagent A: typical subagent starting with SYSTEM_MESSAGE from parent UUID and sending reply back via send_message
+    writeTx(subagentA, [
+      {
+        step_index: 0,
+        source: 'SYSTEM',
+        type: 'SYSTEM_MESSAGE',
+        content: `<SYSTEM_MESSAGE>\n[Message] timestamp=2026-11-15T17:00:00Z sender=${parentId} priority=MESSAGE_PRIORITY_HIGH content=Audit crates\n</SYSTEM_MESSAGE>`,
+      },
+      {
+        step_index: 1,
+        source: 'MODEL',
+        type: 'PLANNER_RESPONSE',
+        content: 'Audit complete.',
+        tool_calls: [{ name: 'send_message', args: { Recipient: `"${parentId}"`, Message: '"Audit complete."' } }],
+      },
+    ]);
+
+    // Subagent B: linked from parent's invoke_subagent tool output
+    writeTx(subagentB, [
+      {
+        step_index: 0,
+        source: 'SYSTEM',
+        type: 'SYSTEM_MESSAGE',
+        content: `<SYSTEM_MESSAGE>\n[Message] timestamp=2026-11-15T17:01:00Z sender=coordinator content=Worker brief\n</SYSTEM_MESSAGE>`,
+      },
+      { step_index: 1, source: 'MODEL', type: 'PLANNER_RESPONSE', content: '', tool_calls: [{ name: 'read_file', args: {} }] },
+    ]);
+
+    // Mobile-created conversation (`sender=system` human prompt): MUST stay visible!
+    writeTx(mobileNewId, [
+      {
+        step_index: 0,
+        source: 'SYSTEM',
+        type: 'SYSTEM_MESSAGE',
+        content: '<SYSTEM_MESSAGE>\n[Message] timestamp=2026-11-15T17:02:00Z sender=system priority=MESSAGE_PRIORITY_HIGH content=Старт с телефона\n</SYSTEM_MESSAGE>',
+      },
+      { step_index: 1, source: 'MODEL', type: 'PLANNER_RESPONSE', content: 'Готов!' },
+    ]);
+
+    const watcher = new BrainWatcher({ brainRoots: [brainRoot] });
+    const ids = watcher.listSessions().map((s) => s.id);
+    assert.deepEqual(ids.sort(), [mobileNewId, parentId].sort());
+    assert.equal(ids.includes(subagentA), false);
+    assert.equal(ids.includes(subagentB), false);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('HostRegistry discovers live daemon/hub_*.json windows, refreshes rotated CSRF tokens, and routes to open IDE workspace hub over standalone hub', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'agy-daemon-hub-'));
+  try {
+    const geminiDir = join(tmp, '.gemini');
+    const daemonDir = join(geminiDir, 'antigravity', 'daemon');
+    const stateDir = join(tmp, 'state');
+    const wsGame = join(tmp, 'projects', 'dice_game');
+    const wsOther = join(tmp, 'projects', 'other_repo');
+    mkdirSync(daemonDir, { recursive: true });
+    mkdirSync(stateDir, { recursive: true });
+    mkdirSync(wsGame, { recursive: true });
+    mkdirSync(wsOther, { recursive: true });
+
+    // Standalone hub (56613) + two IDE workspace hubs (51461 -> wsGame, 61103 -> wsOther) + dead hub (59999)
+    writeFileSync(
+      join(daemonDir, 'hub_56613.json'),
+      JSON.stringify({ pid: 1001, httpPort: 56613, csrfToken: 'csrf_standalone' }),
+    );
+    writeFileSync(
+      join(daemonDir, 'hub_51461.json'),
+      JSON.stringify({ pid: 1002, httpPort: 51461, csrfToken: 'csrf_ide_game_fresh' }),
+    );
+    writeFileSync(
+      join(daemonDir, 'hub_61103.json'),
+      JSON.stringify({ pid: 1003, httpPort: 61103, csrfToken: 'csrf_ide_other' }),
+    );
+    writeFileSync(
+      join(daemonDir, 'hub_59999.json'),
+      JSON.stringify({ pid: 9999, httpPort: 59999, csrfToken: 'csrf_dead' }),
+    );
+
+    // Pre-seed poisoned `hosts-runtime.json`: conv_game wrongly bound to standalone 56613, and stale CSRF on 51461!
+    const convId = '55555555-5555-4555-8555-555555555555';
+    writeFileSync(
+      join(stateDir, 'hosts-runtime.json'),
+      JSON.stringify({
+        updatedAt: Date.now(),
+        hosts: [
+          { lsAddress: 'localhost:56613', csrfToken: 'csrf_standalone', appName: 'antigravity', workspacePaths: [], updatedAt: Date.now() },
+          { lsAddress: '127.0.0.1:51461', csrfToken: 'csrf_STALE', appName: 'antigravity-ide', workspacePaths: [wsGame], updatedAt: Date.now() - 60000 },
+        ],
+        conversations: { [convId]: 'localhost:56613' },
+      }),
+    );
+
+    const mockApi = join(tmp, 'mock-hub-api.mjs');
+    const callsLog = join(tmp, 'calls.jsonl');
+    writeFileSync(
+      mockApi,
+      `#!/usr/bin/env node
+import { appendFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
+const [cmd, ...rest] = process.argv.slice(2);
+const ls = process.env.ANTIGRAVITY_LS_ADDRESS || '';
+const csrf = process.env.ANTIGRAVITY_CSRF_TOKEN || '';
+appendFileSync(${JSON.stringify(callsLog)}, JSON.stringify({ cmd, rest, ls, csrf }) + '\\n');
+if (ls.endsWith(':51461') && csrf !== 'csrf_ide_game_fresh') {
+  console.error('rpc error: code = Unauthenticated desc = unauthenticated: invalid CSRF token');
+  process.exit(1);
+}
+if (cmd === 'get-conversation-metadata') {
+  console.log(JSON.stringify({
+    response: {
+      conversationMetadata: {
+        metadata: {
+          projectId: 'proj_game',
+          workspaceUris: [pathToFileURL(${JSON.stringify(wsGame)}).href],
+        },
+      },
+    },
+  }));
+  process.exit(0);
+}
+if (cmd === 'send-message') {
+  console.log(JSON.stringify({ response: { ok: true, routedTo: ls } }));
+  process.exit(0);
+}
+`,
+    );
+    chmodSync(mockApi, 0o755);
+
+    const sidecarCwd = join(geminiDir, 'config', 'plugins', 'antigravity-remote', 'sidecars', 'control-pane');
+    mkdirSync(sidecarCwd, { recursive: true });
+
+    const driver = new AgentDriver({
+      defaultWorkspace: sidecarCwd,
+      stateDir,
+      geminiDir,
+      agentApiPath: mockApi,
+      agyPath: false,
+      discoverSystemHubs: true,
+      isProcessAlive: (pid) => pid !== 9999,
+      inspectProcessArgs: (pid) => {
+        if (pid === 1001) return '/Applications/Antigravity.app/Contents/Resources/bin/language_server --standalone';
+        if (pid === 1002) return `/bin/agy --hub --hub-port=51461 --add-dir=${wsGame}`;
+        if (pid === 1003) return `/bin/agy --hub --hub-port=61103 --add-dir=${wsOther}`;
+        return '';
+      },
+    });
+
+    // Sidecar internal `.gemini/.../control-pane` path must never leak into user workspaces
+    const listedWorkspaces = driver.listWorkspaces([]);
+    assert.equal(listedWorkspaces.some((w) => w.path.includes('/.gemini/')), false);
+    assert.ok(driver.defaultWorkspace === wsGame || driver.defaultWorkspace === wsOther);
+
+    // 1. Even WITHOUT passing workspaceHint, metadata reveals `wsGame`, so AgentDriver MUST reroute away from standalone 56613 to IDE window 51461!
+    const res1 = await driver.sendMessage(convId, 'Продолжай разработку');
+    assert.equal(res1.ok, true);
+    assert.equal(res1.delivery, 'agentapi');
+    assert.equal(res1.targetHost, 'antigravity-ide');
+
+    // 2. Even if mobile sends internal sidecar path OR another workspace (`wsOther`) in `chat.send`,
+    //    both `rpc-router` and `AgentDriver` must keep routing strictly to `wsGame` (:51461)!
+    const replies = [];
+    await dispatchClientRpc(
+      {
+        type: 'chat.send',
+        reqId: 'r_sidecar_ws',
+        payload: { conversationId: convId, prompt: 'Как прогресс?', workspace: sidecarCwd },
+      },
+      { deviceName: 'TestPhone', reply: (env) => replies.push(env) },
+      {
+        brain: { getSessionWorkspaceHint: () => '', clearSessionStopped: () => {} },
+        driver,
+        approvals: { clearStop: () => {} },
+        auth: {},
+        broadcast: () => {},
+        onStatusChanged: () => {},
+      },
+    );
+    assert.equal(replies.length, 1);
+    assert.equal(replies[0].payload.ok, true);
+
+    const res3 = await driver.sendMessage(convId, 'Ещё вопрос', { workspaceHint: wsOther });
+    assert.equal(res3.ok, true);
+
+    const logged = readFileSync(callsLog, 'utf-8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l));
+    const sendCalls = logged.filter((c) => c.cmd === 'send-message');
+    assert.equal(sendCalls.length, 3);
+    for (const call of sendCalls) {
+      assert.match(call.ls, /:51461$/);
+      assert.equal(call.csrf, 'csrf_ide_game_fresh');
+    }
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});

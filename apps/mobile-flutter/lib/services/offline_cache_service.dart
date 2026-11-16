@@ -55,6 +55,7 @@ class OfflineCacheService {
       final sessions = (map['sessions'] as List? ?? const [])
           .whereType<Map>()
           .map((e) => SessionSummary.fromJson(Map<String, dynamic>.from(e)))
+          .where((s) => !s.isSubagent)
           .toList();
       final workspaces = (map['workspaces'] as List? ?? const [])
           .whereType<Map>()

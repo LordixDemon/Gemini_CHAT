@@ -93,6 +93,7 @@ extension _BridgeControllerInbound on BridgeController {
           sessions = (p['sessions'] as List)
               .whereType<Map>()
               .map((e) => _applyStoppedMask(SessionSummary.fromJson(Map<String, dynamic>.from(e))))
+              .where((s) => !s.isSubagent)
               .toList();
         }
         _applyWorkspacesPayload(p);
@@ -125,6 +126,7 @@ extension _BridgeControllerInbound on BridgeController {
           sessions = (p['sessions'] as List)
               .whereType<Map>()
               .map((e) => _applyStoppedMask(SessionSummary.fromJson(Map<String, dynamic>.from(e))))
+              .where((s) => !s.isSubagent)
               .toList();
           unawaited(_persistMachineSnapshot());
           _emitChange();

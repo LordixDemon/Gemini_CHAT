@@ -263,7 +263,24 @@ extension BridgeControllerActions on BridgeController {
 
     lastError = null;
     final reqId = 'chat_${DateTime.now().microsecondsSinceEpoch}_${++_outboundSeq}';
-    final targetWs = activeWorkspace.isNotEmpty ? activeWorkspace : null;
+    final currentSess = activeConversationId == null
+        ? null
+        : sessions
+              .where((s) => s.id == activeConversationId)
+              .cast<SessionSummary?>()
+              .firstWhere((_) => true, orElse: () => null);
+    final rawTargetWs = activeConversationId != null
+        ? (currentSess != null && currentSess.workspaceHint.isNotEmpty
+              ? currentSess.workspaceHint
+              : '')
+        : activeWorkspace;
+    final normTargetWs = rawTargetWs.replaceAll('\\', '/');
+    final targetWs =
+        (rawTargetWs.isNotEmpty &&
+            !normTargetWs.contains('/.gemini/') &&
+            !normTargetWs.endsWith('/.gemini'))
+        ? rawTargetWs
+        : null;
 
     if (activeConversationId != null) {
       _stoppedSessionStepCounts.remove(activeConversationId);

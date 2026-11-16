@@ -5,18 +5,78 @@
  * VS Code Extension `WorkspaceHeartbeat`, and lifecycle hooks without ever
  * exposing internal LS ports or CSRF tokens over the network.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const HOST_TTL_MS = 24 * 60 * 60 * 1000; // 24h max retention for persisted LS endpoints
+const DAEMON_REFRESH_THROTTLE_MS = 2500;
 
 export function isUserWorkspacePath(rawPath) {
   if (!rawPath || typeof rawPath !== 'string' || !rawPath.trim()) return false;
   const norm = rawPath.trim().replace(/\\/g, '/');
   if (norm.includes('/.gemini/') || norm.endsWith('/.gemini')) return false;
   return true;
+}
+
+export function hostMatchesWorkspace(host, rawHint = '') {
+  const normHint = String(rawHint || '').replace(/\\/g, '/').replace(/\/+$/, '');
+  if (!normHint || !Array.isArray(host?.workspacePaths) || host.workspacePaths.length === 0) {
+    return false;
+  }
+  return host.workspacePaths.some((wp) => {
+    const normWp = String(wp || '').replace(/\\/g, '/').replace(/\/+$/, '');
+    return Boolean(normWp) && (normHint.startsWith(normWp) || normWp.startsWith(normHint));
+  });
+}
+
+export function extractLoopbackPort(lsAddress = '') {
+  const m = /^(?:localhost|127\.0\.0\.1|\[::1\]):(\d+)$/i.exec(String(lsAddress || '').trim());
+  return m ? Number(m[1]) : 0;
+}
+
+export function parseHubProcessCommand(rawCommand = '') {
+  const cmd = String(rawCommand || '').trim();
+  if (!cmd) return { appName: 'antigravity', workspacePaths: [] };
+  const isIdeHub = /(?:^|\s)--hub(?:\s|=|$)/.test(cmd);
+  const workspacePaths = [];
+  const addDirRe = /(?:^|\s)--add-dir(?:=|\s+)(?:"([^"]+)"|'([^']+)'|(\S+))/g;
+  let match;
+  while ((match = addDirRe.exec(cmd)) !== null) {
+    const rawDir = (match[1] || match[2] || match[3] || '').trim();
+    if (rawDir && isUserWorkspacePath(rawDir)) {
+      workspacePaths.push(resolve(rawDir));
+    }
+  }
+  return {
+    appName: isIdeHub ? 'antigravity-ide' : 'antigravity',
+    workspacePaths: [...new Set(workspacePaths)],
+  };
+}
+
+function defaultIsProcessAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err?.code === 'EPERM';
+  }
+}
+
+function defaultInspectProcessArgs(pid) {
+  if (process.platform === 'win32' || !Number.isInteger(pid) || pid <= 0) return '';
+  try {
+    return execFileSync('ps', ['-p', String(pid), '-o', 'command='], {
+      encoding: 'utf-8',
+      timeout: 1200,
+      windowsHide: true,
+    }).trim();
+  } catch {
+    return '';
+  }
 }
 
 export function uriToFsPath(uriOrPath) {
@@ -46,14 +106,45 @@ export class HostRegistry {
   #openWorkspaces = new Map();
 
   #hostsFile = '';
+  #geminiDir = '';
+  #discoverSystemHubs = true;
+  #lastDaemonRefreshAt = 0;
+  /** @type {Map<number, { appName: string, workspacePaths: string[] }>} */
+  #pidInfoCache = new Map();
+  #isProcessAlive = defaultIsProcessAlive;
+  #inspectProcessArgs = defaultInspectProcessArgs;
 
   /**
-   * @param {{ stateDir?: string, agentApiPath?: string }} [opts]
+   * @param {{
+   *   stateDir?: string,
+   *   agentApiPath?: string,
+   *   geminiDir?: string,
+   *   discoverSystemHubs?: boolean,
+   *   isProcessAlive?: (pid: number) => boolean,
+   *   inspectProcessArgs?: (pid: number) => string
+   * }} [opts]
    */
   constructor(opts = {}) {
     this.agentApiPath = opts.agentApiPath || 'agentapi';
     this.#hostsFile = opts.stateDir ? join(opts.stateDir, 'hosts-runtime.json') : '';
+    this.#geminiDir =
+      opts.geminiDir ||
+      (opts.stateDir ? dirname(resolve(opts.stateDir)) : join(homedir(), '.gemini'));
+    const customMockApiOnly = Boolean(
+      opts.agentApiPath && opts.agentApiPath !== 'agentapi' && !opts.geminiDir,
+    );
+    this.#discoverSystemHubs =
+      opts.discoverSystemHubs !== undefined ? Boolean(opts.discoverSystemHubs) : !customMockApiOnly;
+    if (typeof opts.isProcessAlive === 'function') {
+      this.#isProcessAlive = opts.isProcessAlive;
+    }
+    if (typeof opts.inspectProcessArgs === 'function') {
+      this.#inspectProcessArgs = opts.inspectProcessArgs;
+    }
     this.load();
+    if (this.#discoverSystemHubs) {
+      this.refreshDaemonHubs({ force: true });
+    }
   }
 
   load() {
@@ -126,6 +217,138 @@ export class HostRegistry {
 
   hasKnownHost(lsAddress) {
     return Boolean(lsAddress && this.#knownHosts.has(lsAddress));
+  }
+
+  getHost(lsAddress) {
+    if (!lsAddress) return null;
+    if (this.#knownHosts.has(lsAddress)) return this.#knownHosts.get(lsAddress) || null;
+    const port = extractLoopbackPort(lsAddress);
+    if (port > 0) {
+      for (const h of this.#knownHosts.values()) {
+        if (extractLoopbackPort(h.lsAddress) === port) return h;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Discovers active Antigravity IDE / Desktop hubs from `<geminiDir>/<surface>/daemon/hub_*.json`
+   * so open IDE workspace windows (`agy --hub --add-dir=...`) and rotated CSRF tokens are always live
+   * even before any hook fires in that window.
+   */
+  refreshDaemonHubs({ force = false } = {}) {
+    if (!this.#discoverSystemHubs || !this.#geminiDir || !existsSync(this.#geminiDir)) {
+      return false;
+    }
+    const now = Date.now();
+    if (!force && now - this.#lastDaemonRefreshAt < DAEMON_REFRESH_THROTTLE_MS) {
+      return false;
+    }
+    this.#lastDaemonRefreshAt = now;
+
+    let mutated = false;
+    let surfaces = [];
+    try {
+      surfaces = readdirSync(this.#geminiDir);
+    } catch {
+      return false;
+    }
+
+    for (const surface of surfaces) {
+      const daemonDir = join(this.#geminiDir, surface, 'daemon');
+      if (!existsSync(daemonDir)) continue;
+      let files = [];
+      try {
+        files = readdirSync(daemonDir).filter((f) => /^hub_\d+\.json$/i.test(f));
+      } catch {
+        continue;
+      }
+
+      for (const file of files) {
+        let hub;
+        try {
+          hub = JSON.parse(readFileSync(join(daemonDir, file), 'utf-8'));
+        } catch {
+          continue;
+        }
+        const pid = Number(hub?.pid) || 0;
+        const httpPort = Number(hub?.httpPort) || 0;
+        const csrfToken = typeof hub?.csrfToken === 'string' ? hub.csrfToken.trim() : '';
+        if (httpPort <= 0 || !csrfToken) continue;
+
+        let existingKey = '';
+        for (const k of this.#knownHosts.keys()) {
+          if (extractLoopbackPort(k) === httpPort) {
+            existingKey = k;
+            break;
+          }
+        }
+
+        if (!this.#isProcessAlive(pid)) {
+          this.#pidInfoCache.delete(pid);
+          if (existingKey) {
+            this.pruneDeadHost(existingKey);
+            mutated = true;
+          }
+          continue;
+        }
+
+        let procInfo = this.#pidInfoCache.get(pid);
+        if (!procInfo) {
+          const cmd = this.#inspectProcessArgs(pid);
+          procInfo = parseHubProcessCommand(cmd);
+          this.#pidInfoCache.set(pid, procInfo);
+        }
+
+        const prev = existingKey ? this.#knownHosts.get(existingKey) : null;
+        const lsAddress = existingKey || `127.0.0.1:${httpPort}`;
+        const mergedWorkspaces =
+          procInfo.workspacePaths.length > 0
+            ? [...new Set([...procInfo.workspacePaths, ...(prev?.workspacePaths || []).filter(isUserWorkspacePath)])]
+            : (prev?.workspacePaths || []).filter(isUserWorkspacePath);
+        const appName =
+          procInfo.appName === 'antigravity-ide'
+            ? 'antigravity-ide'
+            : prev?.appName || procInfo.appName || 'antigravity';
+
+        for (const wp of procInfo.workspacePaths) {
+          this.#openWorkspaces.set(wp, now);
+        }
+
+        const changed =
+          !prev ||
+          prev.csrfToken !== csrfToken ||
+          prev.appName !== appName ||
+          prev.workspacePaths.length !== mergedWorkspaces.length ||
+          prev.workspacePaths.some((p, i) => p !== mergedWorkspaces[i]);
+
+        const record = {
+          lsAddress,
+          csrfToken,
+          agentApiExe: prev?.agentApiExe || '',
+          projectId: prev?.projectId || '',
+          appName,
+          workspacePaths: mergedWorkspaces,
+          updatedAt: prev?.updatedAt || now,
+        };
+        this.#knownHosts.set(lsAddress, record);
+
+        for (const [convId, bound] of this.#conversationHosts.entries()) {
+          if (bound?.lsAddress === lsAddress) {
+            this.#conversationHosts.set(convId, record);
+          }
+        }
+
+        if (changed) {
+          mutated = true;
+        }
+      }
+    }
+
+    if (mutated) {
+      this.save();
+    }
+    return mutated;
   }
 
   bindConversationHost(conversationId, host) {
@@ -214,6 +437,7 @@ export class HostRegistry {
   }
 
   getSummary({ acpAvailable = false } = {}) {
+    this.refreshDaemonHubs();
     const hosts = [...this.#knownHosts.values()]
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .map((h) => ({
@@ -229,6 +453,7 @@ export class HostRegistry {
   }
 
   listWorkspaces(defaultWorkspace, sessions = []) {
+    this.refreshDaemonHubs();
     const map = new Map();
     const homeNorm = homedir().replace(/\\/g, '/').replace(/\/+$/, '');
     const defaultAbs = resolve(defaultWorkspace);
@@ -256,7 +481,9 @@ export class HostRegistry {
       });
     };
 
-    addCandidate(defaultWorkspace);
+    if (isUserWorkspacePath(defaultWorkspace)) {
+      addCandidate(defaultWorkspace);
+    }
     for (const h of this.#knownHosts.values()) {
       for (const wp of h.workspacePaths || []) {
         addCandidate(wp, { isOpenInHost: true });
@@ -293,7 +520,29 @@ export class HostRegistry {
     });
   }
 
+  firstOpenUserWorkspace() {
+    this.refreshDaemonHubs();
+    const sortedHosts = [...this.#knownHosts.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+    for (const h of sortedHosts) {
+      for (const wp of h.workspacePaths || []) {
+        if (isUserWorkspacePath(wp) && existsSync(wp)) {
+          return resolve(wp);
+        }
+      }
+    }
+    let bestPath = '';
+    let bestTs = 0;
+    for (const [wp, ts] of this.#openWorkspaces.entries()) {
+      if (ts > bestTs && isUserWorkspacePath(wp) && existsSync(wp)) {
+        bestPath = resolve(wp);
+        bestTs = ts;
+      }
+    }
+    return bestPath;
+  }
+
   buildCandidateHosts(conversationId = '', workspaceHint = '') {
+    this.refreshDaemonHubs();
     const out = [];
     const seen = new Set();
     const pushHost = (h) => {
@@ -302,21 +551,26 @@ export class HostRegistry {
       out.push(h);
     };
 
-    if (conversationId && this.#conversationHosts.has(conversationId)) {
-      pushHost(this.#conversationHosts.get(conversationId));
-    }
+    const bound = conversationId ? this.#conversationHosts.get(conversationId) || null : null;
+    const normHint = isUserWorkspacePath(workspaceHint)
+      ? String(workspaceHint).replace(/\\/g, '/').replace(/\/+$/, '')
+      : '';
 
-    const normHint = String(workspaceHint || '').replace(/\\/g, '/').replace(/\/+$/, '');
     if (normHint) {
       const matching = [...this.#knownHosts.values()]
-        .filter((h) =>
-          h.workspacePaths.some((wp) => {
-            const normWp = wp.replace(/\\/g, '/').replace(/\/+$/, '');
-            return normHint.startsWith(normWp) || normWp.startsWith(normHint);
-          }),
-        )
+        .filter((h) => hostMatchesWorkspace(h, normHint))
         .sort((a, b) => b.updatedAt - a.updatedAt);
-      for (const h of matching) pushHost(h);
+
+      if (matching.length > 0) {
+        if (bound && hostMatchesWorkspace(bound, normHint)) {
+          pushHost(bound);
+        }
+        for (const h of matching) pushHost(h);
+      }
+    }
+
+    if (bound) {
+      pushHost(bound);
     }
 
     if (process.env.ANTIGRAVITY_LS_ADDRESS) {
@@ -331,8 +585,14 @@ export class HostRegistry {
       });
     }
 
-    const remaining = [...this.#knownHosts.values()].sort((a, b) => b.updatedAt - a.updatedAt);
-    for (const h of remaining) pushHost(h);
+    // Prefer neutral hosts (e.g. standalone Antigravity) ahead of hosts explicitly bound to a different workspace
+    const allKnown = [...this.#knownHosts.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+    if (normHint) {
+      for (const h of allKnown) {
+        if (!h.workspacePaths || h.workspacePaths.length === 0) pushHost(h);
+      }
+    }
+    for (const h of allKnown) pushHost(h);
 
     return out;
   }

@@ -3,6 +3,7 @@
  * Decouples mobile WebSocket / Cloudflare Edge command handling from HTTP transport.
  */
 import { APPROVAL_MODES, createEnvelope } from '@agy-remote/protocol';
+import { isUserWorkspacePath } from './host-registry.mjs';
 
 /**
  * @param {{ type: string, reqId?: string, payload?: Record<string, any> }} env
@@ -47,10 +48,11 @@ export async function dispatchClientRpc(env, ctx, services) {
       case 'chat.send': {
         approvals?.clearStop?.(p.conversationId);
         brain?.clearSessionStopped?.(p.conversationId);
+        const sessionWs = brain?.getSessionWorkspaceHint?.(p.conversationId) || '';
+        const clientWs = typeof p.workspace === 'string' ? p.workspace.trim() : '';
         const workspaceHint =
-          (typeof p.workspace === 'string' && p.workspace.trim()) ||
-          brain?.getSessionWorkspaceHint?.(p.conversationId) ||
-          '';
+          (isUserWorkspacePath(sessionWs) ? sessionWs : '') ||
+          (isUserWorkspacePath(clientWs) ? clientWs : '');
         const res = await driver.sendMessage(p.conversationId, p.prompt, { workspaceHint });
         ctx.reply(
           createEnvelope('chat.send.result', { conversationId: p.conversationId, ...res }, reqId),

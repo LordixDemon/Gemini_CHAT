@@ -181,7 +181,7 @@ void main() {
     test(
       'cleanMachineName, relativeTime, cleanActivity, and buildTelemetryTheme cover all ranges',
       () {
-        expect(TelemetryFormatters.cleanMachineName('M4s-MacBook-Pro.local'), 'M4s-MacBook-Pro');
+        expect(TelemetryFormatters.cleanMachineName('Dev-Laptop.local'), 'Dev-Laptop');
         expect(TelemetryFormatters.cleanMachineName('  .local '), 'Antigravity Mac');
         expect(TelemetryFormatters.cleanMachineName('StudioPC'), 'StudioPC');
 

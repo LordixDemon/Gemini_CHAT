@@ -9,7 +9,12 @@ import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { AcpSessionRunner } from './acp-runner.mjs';
-import { HostRegistry, uriToFsPath } from './host-registry.mjs';
+import {
+  HostRegistry,
+  hostMatchesWorkspace,
+  isUserWorkspacePath,
+  uriToFsPath,
+} from './host-registry.mjs';
 import { WorkspaceOps } from './workspace-ops.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -55,7 +60,17 @@ export class AgentDriver {
     this.#hosts = new HostRegistry({
       stateDir: opts.stateDir,
       agentApiPath: this.agentApiPath,
+      geminiDir: opts.geminiDir,
+      discoverSystemHubs: opts.discoverSystemHubs,
+      isProcessAlive: opts.isProcessAlive,
+      inspectProcessArgs: opts.inspectProcessArgs,
     });
+    if (!isUserWorkspacePath(this.defaultWorkspace)) {
+      const openWs = this.#hosts.firstOpenUserWorkspace();
+      if (openWs) {
+        this.defaultWorkspace = openWs;
+      }
+    }
     this.#workspaceOps = new WorkspaceOps({
       getDefaultWorkspace: () => this.defaultWorkspace,
     });
@@ -90,11 +105,23 @@ export class AgentDriver {
   }
 
   listWorkspaces(sessions = []) {
+    if (!isUserWorkspacePath(this.defaultWorkspace)) {
+      const openWs = this.#hosts.firstOpenUserWorkspace();
+      if (openWs) {
+        this.defaultWorkspace = openWs;
+      }
+    }
     return this.#hosts.listWorkspaces(this.defaultWorkspace, sessions);
   }
 
   registerHookContext(hookPayload = {}) {
     const registeredHost = this.#hosts.registerHookContext(hookPayload);
+    if (!isUserWorkspacePath(this.defaultWorkspace)) {
+      const openWs = this.#hosts.firstOpenUserWorkspace();
+      if (openWs) {
+        this.defaultWorkspace = openWs;
+      }
+    }
     if (
       registeredHost &&
       this.queuedMessages.size > 0 &&
@@ -145,10 +172,10 @@ export class AgentDriver {
     return this.#workspaceOps.runQuickCommand(command, workspacePath, timeoutMs);
   }
 
-  async _inspectConversationOnHost(host, conversationId) {
+  async _inspectConversationOnHost(host, conversationId, _retriedAuth = false) {
     const cachedProjectId = this.#hosts.getVerifiedProjectId(conversationId);
     if (!conversationId) {
-      return { existsOnHost: true, projectId: host.projectId || '', workspacePath: '' };
+      return { existsOnHost: true, projectId: host.projectId || '', workspacePath: '', host };
     }
 
     const { file, prefixArgs } = this.#hosts.resolveAgentApiCommand(
@@ -168,7 +195,7 @@ export class AgentDriver {
       const trimmed = stdout.trim();
       const parsed = trimmed ? JSON.parse(trimmed) : null;
       if (parsed?.error && isTrajectoryNotFoundText(parsed.error)) {
-        return { existsOnHost: false, projectId: '', workspacePath: '' };
+        return { existsOnHost: false, projectId: '', workspacePath: '', host };
       }
       const meta =
         parsed?.response?.conversationMetadata?.metadata ||
@@ -185,20 +212,31 @@ export class AgentDriver {
         existsOnHost: true,
         projectId: resolvedId,
         workspacePath: uriToFsPath(wsUri),
+        host,
       };
     } catch (err) {
       if (isDeadHostError(err)) {
         this.#hosts.pruneDeadHost(host.lsAddress);
-        return { existsOnHost: false, dead: true, err };
+        return { existsOnHost: false, dead: true, err, host };
       }
       if (err && err.code === 'ENOENT') {
-        return { existsOnHost: false, enoent: true, err };
+        return { existsOnHost: false, enoent: true, err, host };
       }
       const detail = `${err?.stdout || ''} ${err?.stderr || ''} ${err?.message || ''}`;
       if (isTrajectoryNotFoundText(detail)) {
-        return { existsOnHost: false, notFound: true, err };
+        return { existsOnHost: false, notFound: true, err, host };
       }
-      return { existsOnHost: true, projectId: cachedProjectId, workspacePath: '' };
+      if (/invalid CSRF token|code\s*=\s*Unauthenticated/i.test(detail)) {
+        if (!_retriedAuth) {
+          this.#hosts.refreshDaemonHubs({ force: true });
+          const refreshed = this.#hosts.getHost(host.lsAddress);
+          if (refreshed && refreshed.csrfToken && refreshed.csrfToken !== host.csrfToken) {
+            return this._inspectConversationOnHost(refreshed, conversationId, true);
+          }
+        }
+        return { existsOnHost: false, authFailed: true, err, host };
+      }
+      return { existsOnHost: true, projectId: cachedProjectId, workspacePath: '', host };
     }
   }
 
@@ -224,12 +262,16 @@ export class AgentDriver {
   }
 
   async _trySendMessageViaHosts(conversationId, cleanPrompt, workspaceHint = '') {
-    const candidates = this.#hosts.buildCandidateHosts(conversationId, workspaceHint);
+    const cleanHint = isUserWorkspacePath(workspaceHint) ? workspaceHint : '';
+    const queue = [...this.#hosts.buildCandidateHosts(conversationId, cleanHint)];
+    const deferredAfterMatch = new Set();
     let lastErr = null;
     let discoveredWorkspace = '';
 
-    for (const host of candidates) {
-      const inspection = await this._inspectConversationOnHost(host, conversationId);
+    for (let i = 0; i < queue.length; i++) {
+      const candidateHost = queue[i];
+      const inspection = await this._inspectConversationOnHost(candidateHost, conversationId);
+      const host = inspection.host || candidateHost;
       if (inspection.workspacePath && !discoveredWorkspace) {
         discoveredWorkspace = inspection.workspacePath;
       }
@@ -237,6 +279,30 @@ export class AgentDriver {
         if (inspection.err) lastErr = inspection.err;
         if (inspection.enoent) break;
         continue;
+      }
+
+      // If metadata reveals the conversation's workspace and another live IDE window explicitly owns that workspace,
+      // route to that IDE window hub first so the open laptop UI updates in real time instead of cold-loading elsewhere!
+      const metaWs =
+        inspection.workspacePath && isUserWorkspacePath(inspection.workspacePath)
+          ? inspection.workspacePath
+          : '';
+      const effectiveWs = metaWs || cleanHint;
+      if (
+        effectiveWs &&
+        !hostMatchesWorkspace(host, effectiveWs) &&
+        !deferredAfterMatch.has(host.lsAddress)
+      ) {
+        const betterIdx = queue.findIndex(
+          (h, idx) => idx > i && hostMatchesWorkspace(h, effectiveWs),
+        );
+        if (betterIdx !== -1) {
+          deferredAfterMatch.add(host.lsAddress);
+          const [betterHost] = queue.splice(betterIdx, 1);
+          queue.splice(i, 0, betterHost);
+          i -= 1;
+          continue;
+        }
       }
 
       const { file, prefixArgs } = this.#hosts.resolveAgentApiCommand(

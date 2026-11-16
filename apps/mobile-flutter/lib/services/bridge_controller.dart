@@ -170,6 +170,10 @@ class BridgeController extends ChangeNotifier {
   }
 
   void _upsertSessionSummary(SessionSummary incoming) {
+    if (incoming.isSubagent) {
+      sessions = sessions.where((s) => s.id != incoming.id).toList();
+      return;
+    }
     final masked = _applyStoppedMask(incoming);
     final idx = sessions.indexWhere((s) => s.id == masked.id);
     if (idx == -1) {

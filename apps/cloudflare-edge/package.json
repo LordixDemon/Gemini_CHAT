@@ -1,0 +1,13 @@
+{
+  "name": "@agy-remote/cloudflare-edge",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "npx wrangler dev",
+    "deploy": "npx wrangler deploy",
+    "typecheck": "tsc --noEmit"
+  }
+}
+

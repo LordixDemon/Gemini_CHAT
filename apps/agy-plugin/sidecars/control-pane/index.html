@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Antigravity Remote Control</title>
+  <script src="/preload.js"></script>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="pane-shell">
+    <!-- Top Status Strip -->
+    <header class="pane-header">
+      <div class="title-row">
+        <span id="liveDot" class="status-dot live"></span>
+        <div>
+          <div class="pane-title">Remote Control</div>
+          <div id="hostSubtitle" class="pane-sub">LAN Bridge активен</div>
+        </div>
+      </div>
+      <span id="clientsBadge" class="pill-count">0 онлайн</span>
+    </header>
+
+    <div class="pane-scroll">
+      <!-- Pending Approvals Banner (shown only when a tool awaits decision) -->
+      <section id="pendingBox" class="card gate-card hidden">
+        <div class="section-head">
+          <div style="display:flex;align-items:center;gap:6px">
+            <span class="gate-title">Ожидает подтверждения</span>
+            <span id="pendingCount" class="badge-warn">1</span>
+          </div>
+          <button id="allowAllBtn" class="btn-primary xs hidden">Разрешить всё</button>
+        </div>
+        <div id="pendingList" class="stack"></div>
+      </section>
+
+      <!-- Pending File Changes Card ("Сохранить всё") -->
+      <section id="changesBox" class="card hidden" style="border-color:rgba(16,185,129,0.45)">
+        <div class="section-head">
+          <div style="display:flex;align-items:center;gap:6px">
+            <span class="card-title" style="color:#10B981">Изменённые файлы</span>
+            <span id="changesCount" class="pill-count">0</span>
+          </div>
+          <div style="display:flex;gap:5px">
+            <button id="revertAllChangesBtn" class="btn-danger-xs" title="Откатить все несохранённые правки">Откатить</button>
+            <button id="saveAllChangesBtn" class="btn-primary" style="padding:4px 9px;font-size:11px;background:#10B981;color:#041A12">Сохранить всё</button>
+          </div>
+        </div>
+        <div id="changesList" class="stack"></div>
+      </section>
+
+      <!-- QR & Pairing Block -->
+      <section class="card qr-card">
+        <div class="qr-layout">
+          <div id="qrBox" class="qr-frame" aria-label="QR-код подключения"></div>
+          <div class="qr-info">
+            <div class="field-label">Одноразовый PIN</div>
+            <div class="pin-row">
+              <span id="pinValue" class="pin-code">--- ---</span>
+              <button id="rotatePinBtn" class="btn-ghost xs" title="Сгенерировать новый PIN и QR">Обновить</button>
+            </div>
+
+            <div class="field-label">Адрес в локальной сети</div>
+            <select id="lanIpSelect" class="select-compact"></select>
+
+            <div class="copy-row">
+              <input id="pairUrlInput" type="text" readonly class="mono-url">
+              <button id="copyUrlBtn" class="btn-ghost xs">Копия</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Approval Gate Policy -->
+      <section class="card">
+        <div class="section-head">
+          <span class="card-title">Режим проверки тулов (PreToolUse)</span>
+        </div>
+        <div class="mode-grid" role="radiogroup" aria-label="Approval mode">
+          <button class="mode-btn" data-mode="ask-mobile">
+            <strong>Ask Phone</strong>
+            <span>Подтверждение на телефоне</span>
+          </button>
+          <button class="mode-btn" data-mode="auto-safe">
+            <strong>Auto-Safe</strong>
+            <span>Тесты авто, запись — телефон</span>
+          </button>
+          <button class="mode-btn" data-mode="observe">
+            <strong>Observe</strong>
+            <span>Только мониторинг и чат</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- Cloudflare Edge / Tunnel Configuration -->
+      <section class="card">
+        <div class="section-head">
+          <span class="card-title">Cloudflare Сессии и Туннель</span>
+          <span id="cfStatusBadge" class="status-tag">LAN Only</span>
+        </div>
+        <div class="form-stack">
+          <select id="cfModeSelect" class="select-compact">
+            <option value="disabled">Отключено (только локальная сеть LAN)</option>
+            <option value="edge-worker">Cloudflare Workers + Durable Objects (Релей сессий)</option>
+            <option value="cloudflared">Cloudflare Quick Tunnel (cloudflared)</option>
+          </select>
+          <div id="cfWorkerFields" class="form-stack hidden">
+            <input id="cfUrlInput" type="url" class="input-compact" placeholder="https://agy-remote.your-domain.workers.dev">
+            <input id="cfSecretInput" type="password" class="input-compact" placeholder="Host Secret (HOST_AUTH_SECRET)">
+          </div>
+          <div id="cfErrorText" class="error-inline hidden"></div>
+          <button id="saveCfBtn" class="btn-primary sm">Применить транспорт</button>
+        </div>
+      </section>
+
+      <!-- Paired Devices -->
+      <section class="card">
+        <div class="section-head">
+          <span class="card-title">Привязанные устройства</span>
+          <span id="pairedCount" class="muted-small">0</span>
+        </div>
+        <div id="devicesList" class="stack"></div>
+      </section>
+    </div>
+  </div>
+  <script src="/pane.js"></script>
+</body>
+</html>
+

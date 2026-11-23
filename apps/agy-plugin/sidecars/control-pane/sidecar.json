@@ -1,0 +1,19 @@
+{
+  "command": "node",
+  "args": ["main.mjs"],
+  "restart_policy": "always",
+  "display_name": "Remote Control",
+  "description": "Mobile Remote Control bridge for Antigravity: QR pairing, LAN & Cloudflare Edge sessions, and mobile PreToolUse approval gate.",
+  "has_web_ui": true,
+  "ui_config": {
+    "display_name": "Remote Control",
+    "views": [
+      {
+        "title": "Remote Control",
+        "path": "/",
+        "entrypoint": "SIDECAR_UI_ENTRYPOINT_AUX_PANE"
+      }
+    ]
+  }
+}
+

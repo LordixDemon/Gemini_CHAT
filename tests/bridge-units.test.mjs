@@ -1799,6 +1799,22 @@ if (args[0] === 'send-message') {
           created_at: '2026-11-23T20:03:05Z',
           content: '<USER_REQUEST>\nРучной повтор\n</USER_REQUEST>',
         }),
+        // Reversed idle-wakeup order: SYSTEM_SDK USER_INPUT followed 1s later by SYSTEM_MESSAGE(sender=system)
+        JSON.stringify({
+          step_index: 9,
+          source: 'SYSTEM_SDK',
+          type: 'USER_INPUT',
+          created_at: '2026-11-23T20:04:00Z',
+          content: '<USER_REQUEST>\nкак успехи?\n</USER_REQUEST>',
+        }),
+        JSON.stringify({
+          step_index: 10,
+          source: 'SYSTEM',
+          type: 'SYSTEM_MESSAGE',
+          created_at: '2026-11-23T20:04:01Z',
+          content:
+            '<SYSTEM_MESSAGE>\n[Message] timestamp=2026-11-23T20:04:00Z sender=system priority=MESSAGE_PRIORITY_HIGH content=как успехи?\n</SYSTEM_MESSAGE>',
+        }),
       ].join('\n') + '\n',
     );
 
@@ -1806,7 +1822,7 @@ if (args[0] === 'send-message') {
     const detail = watcher.getSessionDetail(convId, 50);
     assert.ok(detail);
     const userSteps = detail.steps.filter((s) => s.role === 'user');
-    assert.equal(userSteps.length, 5);
+    assert.equal(userSteps.length, 6);
     assert.equal(userSteps[0].content, 'Первый десктоп запрос');
     assert.equal(userSteps[1].content, 'Проверь тесты на телефоне');
     assert.equal(userSteps[1].seq, 2);
@@ -1814,6 +1830,8 @@ if (args[0] === 'send-message') {
     assert.equal(userSteps[2].content, 'Проверь тесты на телефоне');
     assert.equal(userSteps[3].content, 'Ручной повтор');
     assert.equal(userSteps[4].content, 'Ручной повтор');
+    assert.equal(userSteps[5].content, 'как успехи?');
+    assert.equal(userSteps[5].source, 'mobile');
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -2083,4 +2101,65 @@ test('Code audit fixes: UTF-8 safeEqual, BrainWatcher incremental append/truncat
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+test('dispatchClientRpc deduplicates retried chat.send and chat.new calls by reqId', async () => {
+  const { dispatchClientRpc } = await import('../packages/bridge-core/src/rpc-router.mjs');
+  let sendCalls = 0;
+  let newCalls = 0;
+  const mockDriver = {
+    defaultWorkspace: '/Users/dev/app',
+    listWorkspaces: () => [],
+    async sendMessage(convId, prompt) {
+      sendCalls += 1;
+      await new Promise((r) => setTimeout(r, 15));
+      return { ok: true, delivery: 'agentapi', call: sendCalls, convId, prompt };
+    },
+    async createConversation(prompt) {
+      newCalls += 1;
+      return { ok: true, delivery: 'agentapi', conversationId: `conv_new_${newCalls}`, prompt };
+    },
+  };
+  const services = {
+    brain: { listSessions: () => [] },
+    driver: mockDriver,
+    approvals: {},
+    changes: null,
+    auth: { updateSettings: () => ({}) },
+    broadcast: () => {},
+    onStatusChanged: () => {},
+  };
+
+  const repliesA = [];
+  const repliesB = [];
+  await Promise.all([
+    dispatchClientRpc(
+      { type: 'chat.send', reqId: 'dup_req_1', payload: { conversationId: 'conv_1', prompt: 'привет' } },
+      { deviceName: 'Phone', reply: (e) => repliesA.push(e) },
+      services,
+    ),
+    dispatchClientRpc(
+      { type: 'chat.send', reqId: 'dup_req_1', payload: { conversationId: 'conv_1', prompt: 'привет' } },
+      { deviceName: 'Phone', reply: (e) => repliesB.push(e) },
+      services,
+    ),
+  ]);
+  assert.equal(sendCalls, 1);
+  assert.equal(repliesA[0].payload.call, 1);
+  assert.equal(repliesB[0].payload.call, 1);
+
+  const newReplies = [];
+  await dispatchClientRpc(
+    { type: 'chat.new', reqId: 'dup_new_1', payload: { prompt: 'новый' } },
+    { deviceName: 'Phone', reply: (e) => newReplies.push(e) },
+    services,
+  );
+  await dispatchClientRpc(
+    { type: 'chat.new', reqId: 'dup_new_1', payload: { prompt: 'новый' } },
+    { deviceName: 'Phone', reply: (e) => newReplies.push(e) },
+    services,
+  );
+  assert.equal(newCalls, 1);
+  assert.equal(newReplies[0].payload.conversationId, 'conv_new_1');
+  assert.equal(newReplies[1].payload.conversationId, 'conv_new_1');
 });

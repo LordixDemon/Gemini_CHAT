@@ -1161,5 +1161,205 @@ void main() {
 
     ctrl.dispose();
   });
+
+  test('switching machines clears old state, ignores late old-socket frames, loads target cache, and handles connect error cleanly', () async {
+    SharedPreferences.setMockInitialValues({
+      'agy_cache_machine_v1_mach_b': jsonEncode({
+        'updatedAtMs': 1700000000000,
+        'activeWorkspace': '/Users/dev/proj-b',
+        'sessions': [
+          {
+            'id': 'conv_b_cached',
+            'title': 'Cached B Session',
+            'status': 'idle',
+            'stepCount': 2,
+            'lastActivity': 'Idle',
+            'artifactCount': 0,
+            'updatedAtMs': 1700000000000,
+          },
+        ],
+        'workspaces': [
+          {'path': '/Users/dev/proj-b', 'name': 'proj-b', 'isDefault': true, 'isOpenInHost': true},
+        ],
+      }),
+    });
+
+    const machineA = SavedMachine(
+      machineId: 'mach_a',
+      machineName: 'Mac-A',
+      lanUrl: 'http://192.168.1.10:7443',
+      cloudflareUrl: '',
+      sessionId: 'mach_a',
+      deviceToken: 'tok_a',
+      lastConnectedAtMs: 1000,
+    );
+    const machineB = SavedMachine(
+      machineId: 'mach_b',
+      machineName: 'Mac-B',
+      lanUrl: 'http://192.168.1.20:7443',
+      cloudflareUrl: '',
+      sessionId: 'mach_b',
+      deviceToken: 'tok_b',
+      lastConnectedAtMs: 2000,
+    );
+    const machineC = SavedMachine(
+      machineId: 'mach_c',
+      machineName: 'Mac-C-Broken',
+      lanUrl: 'http://192.168.1.30:7443',
+      cloudflareUrl: '',
+      sessionId: 'mach_c',
+      deviceToken: 'tok_c',
+      lastConnectedAtMs: 3000,
+    );
+
+    final sockets = <FakeRpcSocketTransport>[];
+    final slowCloseA = Completer<void>();
+    var failHandshakeForC = false;
+    final ctrl = BridgeController(
+      httpClient: MockClient((_) async => http.Response('{"ok":true}', 200)),
+      socketFactory: (uri) {
+        final s = FakeRpcSocketTransport(
+          uri,
+          customClose: uri.host == '192.168.1.10' ? slowCloseA.future : null,
+          customReady: (failHandshakeForC && uri.host == '192.168.1.30')
+              ? Future<void>.error(Exception('Connection refused'))
+              : null,
+        );
+        sockets.add(s);
+        return s;
+      },
+    );
+    await ctrl.init();
+
+    // 1. Connect to Machine A and populate sessions + open session
+    await ctrl.connectToMachine(machineA);
+    final sockA = sockets.last;
+    sockA.emitServer('server.hello', {
+      'sessions': [
+        {
+          'id': 'conv_a_1',
+          'title': 'Machine A Chat',
+          'status': 'working',
+          'stepCount': 4,
+          'lastActivity': 'Running',
+          'artifactCount': 0,
+          'updatedAtMs': 1700000001000,
+        },
+      ],
+      'workspaces': [
+        {'path': '/Users/dev/proj-a', 'name': 'proj-a', 'isDefault': true},
+      ],
+      'activeWorkspace': '/Users/dev/proj-a',
+    });
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    ctrl.openSession('conv_a_1');
+    expect(ctrl.sessions.map((s) => s.id), ['conv_a_1']);
+    expect(ctrl.loadingSessions, isFalse);
+
+    // 2. Switch to Machine B -> Machine A state is immediately cleared & Machine B cache loads
+    final connectBFut = ctrl.connectToMachine(machineB);
+    expect(ctrl.sessions, isEmpty);
+    expect(ctrl.activeConversationId, isNull);
+    expect(ctrl.workspaces, isEmpty);
+    expect(ctrl.loadingSessions, isTrue);
+
+    // Late inbound frame from Machine A's old socket MUST be ignored
+    sockA.emitServer('sessions.updated', {
+      'sessions': [
+        {'id': 'conv_a_stale', 'title': 'Stale A', 'status': 'idle', 'stepCount': 1},
+      ],
+    });
+
+    await connectBFut;
+    expect(ctrl.sessions.map((s) => s.id), ['conv_b_cached']);
+    expect(ctrl.sessionsFromCache, isTrue);
+    expect(ctrl.loadingSessions, isTrue);
+
+    // Live Machine B hello clears loadingSessions & sessionsFromCache
+    final sockB = sockets.last;
+    sockB.emitServer('server.hello', {
+      'sessions': [
+        {
+          'id': 'conv_b_live',
+          'title': 'Live B Chat',
+          'status': 'idle',
+          'stepCount': 5,
+          'lastActivity': 'Idle',
+          'artifactCount': 0,
+          'updatedAtMs': 1700000005000,
+        },
+      ],
+    });
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(ctrl.sessions.map((s) => s.id), ['conv_b_live']);
+    expect(ctrl.loadingSessions, isFalse);
+    expect(ctrl.sessionsFromCache, isFalse);
+
+    // 3. Switch to broken Machine C -> Machine B's sessions MUST NOT remain & error is shown cleanly
+    failHandshakeForC = true;
+    await ctrl.connectToMachine(machineC);
+    expect(ctrl.sessions, isEmpty);
+    expect(ctrl.loadingSessions, isFalse);
+    expect(ctrl.lastError, contains('Ошибка WebSocket'));
+
+    slowCloseA.complete();
+    ctrl.dispose();
+  });
+
+  test('optimistic user step deduplication normalizes CRLF and matches existing real user step', () async {
+    SharedPreferences.setMockInitialValues({});
+    late FakeRpcSocketTransport sock;
+    final ctrl = BridgeController(
+      httpClient: MockClient((_) async => http.Response('{"ok":true}', 200)),
+      socketFactory: (uri) => sock = FakeRpcSocketTransport(uri),
+    );
+    await ctrl.init();
+    await ctrl.connectToMachine(
+      const SavedMachine(
+        machineId: 'mach_dedup',
+        machineName: 'Mac',
+        lanUrl: 'http://192.168.1.7:7443',
+        cloudflareUrl: '',
+        sessionId: 'mach_dedup',
+        deviceToken: 'tok_dedup',
+        lastConnectedAtMs: 1000,
+      ),
+    );
+
+    ctrl.openSession('conv_dup');
+    sock.emitServer('session.detail.result', {
+      'detail': {
+        'summary': {'id': 'conv_dup', 'title': 'Dedup Chat', 'status': 'idle', 'stepCount': 1},
+        'steps': [
+          {'seq': 0, 'stepIndex': 0, 'role': 'assistant', 'status': 'DONE', 'content': 'Hi'},
+        ],
+        'artifacts': const [],
+      },
+    });
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+
+    // Send multi-line prompt with \n -> server emits real step with \r\n via steps_delta -> only 1 user step
+    ctrl.sendPrompt('первая строка\nвторая строка');
+    expect(ctrl.activeSteps.where((s) => s.role == 'user').length, 1);
+
+    sock.emitServer('session.steps_delta', {
+      'conversationId': 'conv_dup',
+      'steps': [
+        {
+          'seq': 1,
+          'stepIndex': 1,
+          'role': 'user',
+          'source': 'mobile',
+          'status': 'DONE',
+          'content': 'первая строка\r\nвторая строка',
+        },
+      ],
+    });
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(ctrl.activeSteps.where((s) => s.role == 'user').length, 1);
+    expect(ctrl.activeSteps.last.isOptimistic, isFalse);
+
+    ctrl.dispose();
+  });
 }
 

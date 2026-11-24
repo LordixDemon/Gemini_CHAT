@@ -42,6 +42,17 @@ const WORKSPACE_ROOT_MARKERS = [
 ];
 const ACTIVE_WS_RE = /Active Workspaces:\s*\r?\n-\s*([^\r\n]+)/;
 
+function normalizePromptForDedup(text) {
+  return String(text || '').replace(/\r\n/g, '\n').trim();
+}
+
+function findPrevVisibleStep(steps) {
+  for (let k = steps.length - 1; k >= 0; k--) {
+    if (steps[k].role !== 'tool_result') return steps[k];
+  }
+  return null;
+}
+
 function isStepTruncated(obj) {
   if (!obj || typeof obj !== 'object') return false;
   if (Array.isArray(obj.truncated_fields) && obj.truncated_fields.length > 0) {
@@ -655,20 +666,14 @@ export class BrainWatcher extends EventEmitter {
         if (!title && cleanPrompt) {
           title = cleanPrompt.split('\n')[0].slice(0, 90);
         }
-        let prevVisible = null;
-        for (let k = steps.length - 1; k >= 0; k--) {
-          if (steps[k].role !== 'tool_result') {
-            prevVisible = steps[k];
-            break;
-          }
-        }
+        const prevVisible = findPrevVisibleStep(steps);
         const curTs = Date.parse(createdAt) || 0;
         const prevTs = prevVisible ? Date.parse(prevVisible.createdAt || '') || 0 : 0;
         const isMirroredMobilePrompt = Boolean(
           prevVisible &&
             prevVisible.role === 'user' &&
-            prevVisible.source === 'mobile' &&
-            prevVisible.content.trim() === cleanPrompt.trim() &&
+            (prevVisible.source === 'mobile' || obj.source === 'SYSTEM_SDK') &&
+            normalizePromptForDedup(prevVisible.content) === normalizePromptForDedup(cleanPrompt) &&
             Math.abs(curTs - prevTs) <= 120_000,
         );
         if (isMirroredMobilePrompt) {
@@ -682,7 +687,7 @@ export class BrainWatcher extends EventEmitter {
             content: cleanPrompt,
           });
         } else {
-          pushStep({
+          const userStep = {
             seq,
             stepIndex,
             role: 'user',
@@ -690,7 +695,11 @@ export class BrainWatcher extends EventEmitter {
             status: obj.status || 'DONE',
             createdAt,
             content: cleanPrompt,
-          });
+          };
+          if (obj.source === 'SYSTEM_SDK') {
+            userStep.source = 'mobile';
+          }
+          pushStep(userStep);
           lastActivity = 'User prompt received';
         }
       } else if (type === 'SYSTEM_MESSAGE' || type === 'USER_INPUT') {
@@ -699,17 +708,38 @@ export class BrainWatcher extends EventEmitter {
           if (!title) {
             title = remotePrompt.split('\n')[0].slice(0, 90);
           }
-          pushStep({
-            seq,
-            stepIndex,
-            role: 'user',
-            type: 'USER_INPUT',
-            source: 'mobile',
-            status: obj.status || 'DONE',
-            createdAt,
-            content: remotePrompt,
-          });
-          lastActivity = 'Mobile prompt received';
+          const prevVisible = findPrevVisibleStep(steps);
+          const curTs = Date.parse(createdAt) || 0;
+          const prevTs = prevVisible ? Date.parse(prevVisible.createdAt || '') || 0 : 0;
+          const isDuplicateOfPrevUser = Boolean(
+            prevVisible &&
+              prevVisible.role === 'user' &&
+              normalizePromptForDedup(prevVisible.content) === normalizePromptForDedup(remotePrompt) &&
+              Math.abs(curTs - prevTs) <= 120_000,
+          );
+          if (isDuplicateOfPrevUser) {
+            pushStep({
+              seq,
+              stepIndex,
+              role: 'tool_result',
+              type,
+              status: obj.status || 'DONE',
+              createdAt,
+              content: remotePrompt,
+            });
+          } else {
+            pushStep({
+              seq,
+              stepIndex,
+              role: 'user',
+              type: 'USER_INPUT',
+              source: 'mobile',
+              status: obj.status || 'DONE',
+              createdAt,
+              content: remotePrompt,
+            });
+            lastActivity = 'Mobile prompt received';
+          }
         } else {
           const snippet = typeof obj.content === 'string' ? obj.content.slice(0, 1200) : '';
           pushStep({

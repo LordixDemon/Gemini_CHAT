@@ -23,18 +23,35 @@ class CockpitScreen extends StatefulWidget {
 class _CockpitScreenState extends State<CockpitScreen> {
   int _tabIndex = 0;
   bool _creatingNewSession = false;
+  String? _lastMachineId;
 
   @override
   void initState() {
     super.initState();
+    _lastMachineId = widget.controller.activeMachine?.machineId;
+    widget.controller.addListener(_handleMachineChanged);
     widget.controller.notificationOpenSessionNotifier.addListener(_handleNotificationRoute);
     _handleNotificationRoute();
   }
 
   @override
   void dispose() {
+    widget.controller.removeListener(_handleMachineChanged);
     widget.controller.notificationOpenSessionNotifier.removeListener(_handleNotificationRoute);
     super.dispose();
+  }
+
+  void _handleMachineChanged() {
+    final nextId = widget.controller.activeMachine?.machineId;
+    if (nextId != _lastMachineId) {
+      _lastMachineId = nextId;
+      if (mounted) {
+        setState(() {
+          _tabIndex = 0;
+          _creatingNewSession = false;
+        });
+      }
+    }
   }
 
   void _handleNotificationRoute() {
@@ -384,6 +401,7 @@ class _CockpitScreenState extends State<CockpitScreen> {
                 ctrl.activeMachine?.machineName ?? 'Antigravity Mac',
               );
               final isLive = ctrl.phase == ConnectionPhase.connected;
+              final hasConnError = !isLive && ctrl.lastError != null && ctrl.lastError!.isNotEmpty;
               final (modeLabel, modeIcon, modeColor) = _modeMeta(ctrl.approvalMode);
 
               return AppBar(
@@ -414,10 +432,18 @@ class _CockpitScreenState extends State<CockpitScreen> {
                               height: 9,
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
-                                color: isLive ? TelemetryColors.live : TelemetryColors.warn,
+                                color: isLive
+                                    ? TelemetryColors.live
+                                    : (hasConnError
+                                          ? TelemetryColors.danger
+                                          : TelemetryColors.warn),
                                 boxShadow: [
                                   BoxShadow(
-                                    color: (isLive ? TelemetryColors.live : TelemetryColors.warn)
+                                    color: (isLive
+                                            ? TelemetryColors.live
+                                            : (hasConnError
+                                                  ? TelemetryColors.danger
+                                                  : TelemetryColors.warn))
                                         .withValues(alpha: 0.65),
                                     blurRadius: 8,
                                   ),
@@ -460,6 +486,17 @@ class _CockpitScreenState extends State<CockpitScreen> {
                                         ? ValueListenableBuilder<int?>(
                                             valueListenable: ctrl.latencyNotifier,
                                             builder: (context, latency, _) {
+                                              if (ctrl.loadingSessions) {
+                                                return Text(
+                                                  '${ctrl.activeTransport} · Загрузка…',
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                  style: const TextStyle(
+                                                    fontSize: 11.5,
+                                                    color: TelemetryColors.textSecondary,
+                                                  ),
+                                                );
+                                              }
                                               final latencyTag =
                                                   latency != null ? ' · $latency мс' : '';
                                               return Text(
@@ -474,23 +511,32 @@ class _CockpitScreenState extends State<CockpitScreen> {
                                             },
                                           )
                                         : Text(
-                                            ctrl.sessions.isNotEmpty
-                                                ? 'Офлайн-кэш · Переподключение…'
-                                                : 'Переподключение…',
+                                            hasConnError
+                                                ? 'Ошибка подключения'
+                                                : (ctrl.sessions.isNotEmpty &&
+                                                          ctrl.sessionsFromCache
+                                                      ? 'Кэш · Подключение…'
+                                                      : 'Подключение…'),
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
-                                            style: const TextStyle(
+                                            style: TextStyle(
                                               fontSize: 11.5,
-                                              color: TelemetryColors.warn,
+                                              color: hasConnError
+                                                  ? TelemetryColors.danger
+                                                  : TelemetryColors.warn,
                                             ),
                                           ),
                                   ),
                                   if (!isLive) ...[
                                     const SizedBox(width: 4),
-                                    const Icon(
-                                      Icons.refresh_rounded,
+                                    Icon(
+                                      hasConnError
+                                          ? Icons.error_outline_rounded
+                                          : Icons.refresh_rounded,
                                       size: 13,
-                                      color: TelemetryColors.warn,
+                                      color: hasConnError
+                                          ? TelemetryColors.danger
+                                          : TelemetryColors.warn,
                                     ),
                                   ],
                                 ],

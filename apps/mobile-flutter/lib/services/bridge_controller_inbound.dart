@@ -22,6 +22,20 @@ extension _BridgeControllerInbound on BridgeController {
     }
   }
 
+  String _normPrompt(String text) => text.replaceAll('\r\n', '\n').trim();
+
+  bool _optimisticMatchedByRealSteps(AgentStep opt, Iterable<AgentStep> realSteps) {
+    final target = _normPrompt(opt.content);
+    for (final step in realSteps) {
+      if (step.isOptimistic || step.role != 'user') continue;
+      if (_normPrompt(step.content) != target) continue;
+      if (opt.seq == AgentStep.optimisticStepIndex || step.seq > (opt.seq - 100000)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   void _updateOptimisticStepStatus(int? optimisticSeq, String nextStatus) {
     var updated = false;
     activeSteps = activeSteps.map((s) {
@@ -162,7 +176,13 @@ extension _BridgeControllerInbound on BridgeController {
               .map((e) => _applyStoppedMask(SessionSummary.fromJson(Map<String, dynamic>.from(e))))
               .where((s) => !s.isSubagent)
               .toList();
+          loadingSessions = false;
+          sessionsFromCache = false;
           _updateWorkingTrackerAndNotify(sessions, notify: false);
+        }
+        if (lastError != null &&
+            (lastError!.contains('WebSocket') || lastError!.contains('подключ'))) {
+          lastError = null;
         }
         _applyWorkspacesPayload(p);
         if (p['pendingApprovals'] is List) {
@@ -205,6 +225,12 @@ extension _BridgeControllerInbound on BridgeController {
               .map((e) => _applyStoppedMask(SessionSummary.fromJson(Map<String, dynamic>.from(e))))
               .where((s) => !s.isSubagent)
               .toList();
+          loadingSessions = false;
+          sessionsFromCache = false;
+          if (lastError != null &&
+              (lastError!.contains('WebSocket') || lastError!.contains('подключ'))) {
+            lastError = null;
+          }
           _updateWorkingTrackerAndNotify(sessions, notify: true);
           unawaited(_persistMachineSnapshot());
           _emitChange();
@@ -265,12 +291,8 @@ extension _BridgeControllerInbound on BridgeController {
               activeVisibleStepCount > loadedSteps.length;
           if (prevConvId != null && prevConvId == activeConversationId) {
             final pendingOptimistic = activeSteps.where((s) => s.isOptimistic).toList();
-            final arrivedUserContents = <String>{
-              for (final s in loadedSteps)
-                if (s.role == 'user') s.content.trim(),
-            };
             for (final opt in pendingOptimistic) {
-              if (!arrivedUserContents.contains(opt.content.trim())) {
+              if (!_optimisticMatchedByRealSteps(opt, loadedSteps)) {
                 loadedSteps.add(opt);
               }
             }
@@ -321,13 +343,14 @@ extension _BridgeControllerInbound on BridgeController {
                 final step = AgentStep.fromJson(Map<String, dynamic>.from(item));
                 bySeq[step.seq] = step;
                 if (step.role == 'user') {
-                  arrivedUserContents.add(step.content.trim());
+                  arrivedUserContents.add(_normPrompt(step.content));
                 }
               }
             }
             final merged = bySeq.values.toList()..sort((a, b) => a.seq.compareTo(b.seq));
             for (final opt in pendingOptimistic) {
-              if (!arrivedUserContents.contains(opt.content.trim())) {
+              if (!arrivedUserContents.contains(_normPrompt(opt.content)) &&
+                  !_optimisticMatchedByRealSteps(opt, merged)) {
                 merged.add(opt);
               }
             }
@@ -527,6 +550,7 @@ extension _BridgeControllerInbound on BridgeController {
         terminalBusy = false;
         loadingOlderSteps = false;
         loadingSessionDetail = false;
+        loadingSessions = false;
         if (reqId != null && _uploadWaiters.containsKey(reqId)) {
           final waiter = _uploadWaiters.remove(reqId)!;
           if (!waiter.isCompleted) waiter.complete(null);

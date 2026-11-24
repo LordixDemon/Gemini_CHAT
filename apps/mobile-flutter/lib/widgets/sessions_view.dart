@@ -1,3 +1,6 @@
+import 'dart:io' show Platform;
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -25,6 +28,13 @@ class _SessionsViewState extends State<SessionsView> {
   final _searchCtrl = TextEditingController();
   String _query = '';
   String _statusFilter = 'all'; // 'all' | 'working' | 'pinned'
+  String? _lastMachineId;
+
+  @override
+  void initState() {
+    super.initState();
+    _lastMachineId = widget.controller.activeMachine?.machineId;
+  }
 
   @override
   void dispose() {
@@ -156,6 +166,15 @@ class _SessionsViewState extends State<SessionsView> {
   @override
   Widget build(BuildContext context) {
     final ctrl = widget.controller;
+    final currentMachineId = ctrl.activeMachine?.machineId;
+    if (currentMachineId != _lastMachineId) {
+      _lastMachineId = currentMachineId;
+      _query = '';
+      _statusFilter = 'all';
+      if (_searchCtrl.text.isNotEmpty) {
+        _searchCtrl.clear();
+      }
+    }
     final q = _query.trim();
     final filtered = ctrl.filterAndSortSessions(
       query: q,
@@ -165,6 +184,9 @@ class _SessionsViewState extends State<SessionsView> {
     final pinnedCount = ctrl.sessions.where((s) => ctrl.isSessionPinned(s.id)).length;
     final wsNames = _collectWorkspaceNames(ctrl);
     final isOffline = ctrl.phase != ConnectionPhase.connected;
+    final cleanHost = TelemetryFormatters.cleanMachineName(ctrl.activeMachine?.machineName ?? 'ПК');
+    final hasConnError = ctrl.lastError != null && ctrl.lastError!.isNotEmpty;
+    final inTest = !kIsWeb && Platform.environment.containsKey('FLUTTER_TEST');
 
     return Column(
       children: [
@@ -303,6 +325,112 @@ class _SessionsViewState extends State<SessionsView> {
             ),
           ),
 
+        if (hasConnError && (filtered.isNotEmpty || !isOffline))
+          Container(
+            margin: const EdgeInsets.fromLTRB(16, 4, 16, 6),
+            padding: const EdgeInsets.fromLTRB(12, 9, 10, 9),
+            decoration: BoxDecoration(
+              color: TelemetryColors.danger.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: TelemetryColors.danger.withValues(alpha: 0.4)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.error_outline_rounded, size: 17, color: TelemetryColors.danger),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (isOffline && ctrl.sessionsFromCache)
+                        const Text(
+                          'Показан кэш (офлайн)',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: TelemetryColors.warn,
+                          ),
+                        ),
+                      Text(
+                        ctrl.lastError!,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 12, color: TelemetryColors.textPrimary),
+                      ),
+                    ],
+                  ),
+                ),
+                if (isOffline) ...[
+                  TextButton(
+                    style: TextButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      foregroundColor: TelemetryColors.accentBright,
+                    ),
+                    onPressed: ctrl.reconnectNow,
+                    child: const Text('Повторить', style: TextStyle(fontSize: 12)),
+                  ),
+                  TextButton(
+                    style: TextButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      foregroundColor: TelemetryColors.textSecondary,
+                    ),
+                    onPressed: ctrl.disconnect,
+                    child: const Text('Сменить ПК', style: TextStyle(fontSize: 12)),
+                  ),
+                ] else
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
+                    onPressed: ctrl.clearError,
+                    icon: const Icon(
+                      Icons.close_rounded,
+                      size: 16,
+                      color: TelemetryColors.textSecondary,
+                    ),
+                  ),
+              ],
+            ),
+          )
+        else if (!hasConnError && (isOffline || ctrl.loadingSessions) && filtered.isNotEmpty)
+          Container(
+            margin: const EdgeInsets.fromLTRB(16, 4, 16, 6),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: TelemetryColors.bgPanel,
+              borderRadius: BorderRadius.circular(11),
+              border: Border.all(color: TelemetryColors.borderStrong),
+            ),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    value: inTest ? 0.65 : null,
+                    color: TelemetryColors.accentBright,
+                  ),
+                ),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Text(
+                    isOffline && ctrl.sessionsFromCache
+                        ? 'Показан кэш · Подключение к $cleanHost…'
+                        : (isOffline
+                              ? 'Подключение к $cleanHost…'
+                              : 'Обновление списка чатов…'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12, color: TelemetryColors.textSecondary),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
         Expanded(
           child: RefreshIndicator(
             color: TelemetryColors.accentBright,
@@ -319,39 +447,122 @@ class _SessionsViewState extends State<SessionsView> {
                 ? ListView(
                     physics: const AlwaysScrollableScrollPhysics(),
                     children: [
-                      SizedBox(height: MediaQuery.of(context).size.height * 0.18),
-                      Icon(
-                        q.isEmpty && _statusFilter == 'all' && ctrl.selectedWorkspaceFilter.isEmpty
-                            ? Icons.auto_awesome_mosaic_outlined
-                            : Icons.search_off_rounded,
-                        size: 42,
-                        color: TelemetryColors.textDim,
-                      ),
-                      const SizedBox(height: 14),
-                      Text(
-                        q.isEmpty && _statusFilter == 'all' && ctrl.selectedWorkspaceFilter.isEmpty
-                            ? 'Сессий пока нет'
-                            : (q.isNotEmpty
-                                ? 'По запросу «$_query» ничего не найдено'
-                                : 'По выбранному фильтру ничего не найдено'),
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          color: TelemetryColors.textPrimary,
+                      SizedBox(height: MediaQuery.of(context).size.height * 0.16),
+                      if (q.isEmpty &&
+                          _statusFilter == 'all' &&
+                          ctrl.selectedWorkspaceFilter.isEmpty &&
+                          hasConnError &&
+                          isOffline) ...[
+                        const Icon(
+                          Icons.cloud_off_rounded,
+                          size: 42,
+                          color: TelemetryColors.danger,
                         ),
-                      ),
-                      const SizedBox(height: 6),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 40),
-                        child: Text(
-                          q.isEmpty && _statusFilter == 'all' && ctrl.selectedWorkspaceFilter.isEmpty
-                              ? 'Нажмите «Новый», чтобы запустить новую задачу Antigravity с телефона.'
-                              : 'Попробуйте сбросить фильтры или изменить поисковый запрос.',
+                        const SizedBox(height: 14),
+                        Text(
+                          'Не удалось подключиться к $cleanHost',
                           textAlign: TextAlign.center,
-                          style: const TextStyle(fontSize: 13, color: TelemetryColors.textSecondary),
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: TelemetryColors.textPrimary,
+                          ),
                         ),
-                      ),
+                        const SizedBox(height: 6),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 32),
+                          child: Text(
+                            ctrl.lastError!,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(fontSize: 12.5, color: TelemetryColors.textSecondary),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        Wrap(
+                          alignment: WrapAlignment.center,
+                          spacing: 10,
+                          runSpacing: 8,
+                          children: [
+                            FilledButton.icon(
+                              onPressed: ctrl.reconnectNow,
+                              icon: const Icon(Icons.refresh_rounded, size: 17),
+                              label: const Text('Повторить'),
+                            ),
+                            OutlinedButton.icon(
+                              onPressed: ctrl.disconnect,
+                              icon: const Icon(Icons.devices_rounded, size: 17),
+                              label: const Text('Выбрать другой ПК'),
+                            ),
+                          ],
+                        ),
+                      ] else if (q.isEmpty &&
+                          _statusFilter == 'all' &&
+                          ctrl.selectedWorkspaceFilter.isEmpty &&
+                          (isOffline || ctrl.loadingSessions)) ...[
+                        Center(
+                          child: SizedBox(
+                            width: 30,
+                            height: 30,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.6,
+                              value: inTest ? 0.65 : null,
+                              color: TelemetryColors.accentBright,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        Text(
+                          isOffline ? 'Подключение к $cleanHost…' : 'Загрузка чатов…',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: TelemetryColors.textPrimary,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 40),
+                          child: Text(
+                            'Получаем список сессий с компьютера.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 13, color: TelemetryColors.textSecondary),
+                          ),
+                        ),
+                      ] else ...[
+                        Icon(
+                          q.isEmpty && _statusFilter == 'all' && ctrl.selectedWorkspaceFilter.isEmpty
+                              ? Icons.auto_awesome_mosaic_outlined
+                              : Icons.search_off_rounded,
+                          size: 42,
+                          color: TelemetryColors.textDim,
+                        ),
+                        const SizedBox(height: 14),
+                        Text(
+                          q.isEmpty && _statusFilter == 'all' && ctrl.selectedWorkspaceFilter.isEmpty
+                              ? 'Сессий пока нет'
+                              : (q.isNotEmpty
+                                  ? 'По запросу «$_query» ничего не найдено'
+                                  : 'По выбранному фильтру ничего не найдено'),
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: TelemetryColors.textPrimary,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 40),
+                          child: Text(
+                            q.isEmpty && _statusFilter == 'all' && ctrl.selectedWorkspaceFilter.isEmpty
+                                ? 'Нажмите «Новый», чтобы запустить новую задачу Antigravity с телефона.'
+                                : 'Попробуйте сбросить фильтры или изменить поисковый запрос.',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(fontSize: 13, color: TelemetryColors.textSecondary),
+                          ),
+                        ),
+                      ],
                     ],
                   )
                 : ListView.separated(

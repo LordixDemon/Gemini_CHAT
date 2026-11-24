@@ -52,7 +52,7 @@ class BridgeController extends ChangeNotifier {
     this.reconnectDelay = const Duration(milliseconds: 1800),
     this.pingInterval = const Duration(seconds: 10),
     this.pongTimeout = const Duration(seconds: 5),
-    this.chatAckTimeout = const Duration(seconds: 10),
+    this.chatAckTimeout = const Duration(seconds: 25),
   }) : _httpClient = httpClient ?? http.Client(),
        _ownsHttpClient = httpClient == null,
        _socketFactory = socketFactory ?? WebSocketRpcTransport.new,
@@ -86,6 +86,8 @@ class BridgeController extends ChangeNotifier {
 
   String approvalMode = 'ask-mobile';
   List<SessionSummary> sessions = [];
+  bool loadingSessions = false;
+  bool sessionsFromCache = false;
   Set<String> pinnedSessionIds = <String>{};
   List<WorkspaceInfo> workspaces = [];
   String activeWorkspace = '';
@@ -624,6 +626,19 @@ class BridgeController extends ChangeNotifier {
       }
     });
 
+    final prevMachineId = activeMachine?.machineId ?? '';
+    final isSwitchingMachine = prevMachineId != machine.machineId;
+    _closeSocketOnly();
+    if (epoch != _connectEpoch || _manualDisconnect || _disposed) return;
+
+    if (isSwitchingMachine) {
+      _resetMachineSessionState();
+      _reconnectAttempts = 0;
+      loadingSessions = true;
+    } else if (sessions.isEmpty) {
+      loadingSessions = true;
+    }
+
     var currentMachine = machine;
     activeMachine = currentMachine;
     connectingMachineId = currentMachine.machineId;
@@ -641,6 +656,7 @@ class BridgeController extends ChangeNotifier {
           if (sessions.isEmpty && (cached.sessions.isNotEmpty || cached.workspaces.isNotEmpty)) {
             sessions = cached.sessions;
             workspaces = cached.workspaces;
+            sessionsFromCache = cached.sessions.isNotEmpty;
             if (activeWorkspace.isEmpty && cached.activeWorkspace.isNotEmpty) {
               activeWorkspace = cached.activeWorkspace;
             }
@@ -650,9 +666,6 @@ class BridgeController extends ChangeNotifier {
           if (epoch != _connectEpoch || _manualDisconnect || _disposed) return;
         }
       }
-
-      _closeSocketOnly();
-      if (epoch != _connectEpoch || _manualDisconnect || _disposed) return;
 
       String? targetWsUrl;
       String chosenTransport = 'LAN';
@@ -735,6 +748,7 @@ class BridgeController extends ChangeNotifier {
         _attemptWatchdogTimer?.cancel();
         _attemptWatchdogTimer = null;
         connectingMachineId = null;
+        loadingSessions = false;
         lastError = 'Нет доступного токена для LAN или Cloudflare Edge.';
         phase = ConnectionPhase.disconnected;
         _emitChange();
@@ -757,11 +771,17 @@ class BridgeController extends ChangeNotifier {
       }
 
       _wsSub = socket.stream.listen(
-        _handleSocketMessage,
+        (dynamic raw) {
+          if (_disposed || _manualDisconnect || epoch != _connectEpoch || _socket != socket) {
+            return;
+          }
+          _handleSocketMessage(raw);
+        },
         onError: (Object err) {
           if (_disposed || _manualDisconnect || epoch != _connectEpoch || _socket != socket) {
             return;
           }
+          loadingSessions = false;
           lastError = err.toString();
           _scheduleReconnect();
         },
@@ -769,6 +789,7 @@ class BridgeController extends ChangeNotifier {
           if (_disposed || _manualDisconnect || epoch != _connectEpoch || _socket != socket) {
             return;
           }
+          loadingSessions = false;
           _scheduleReconnect();
         },
       );
@@ -797,6 +818,8 @@ class BridgeController extends ChangeNotifier {
       if (_disposed || _manualDisconnect || epoch != _connectEpoch) return;
       _attemptWatchdogTimer?.cancel();
       _attemptWatchdogTimer = null;
+      connectingMachineId = null;
+      loadingSessions = false;
       lastError = 'Ошибка WebSocket: $e';
       _scheduleReconnect();
     }
@@ -939,23 +962,18 @@ class BridgeController extends ChangeNotifier {
     });
   }
 
-  Future<void> disconnect() async {
-    _manualDisconnect = true;
-    ++_connectEpoch;
-    _reconnectAttempts = 0;
-    _reconnectTimer?.cancel();
-    _reconnectTimer = null;
-    _attemptWatchdogTimer?.cancel();
-    _attemptWatchdogTimer = null;
-    _networkDebounceTimer?.cancel();
-    _networkDebounceTimer = null;
+  void _resetMachineSessionState() {
     _clearPendingPrompts();
-    activeMachine = null;
-    connectingMachineId = null;
+    _stoppedSessionStepCounts.clear();
+    _workingSessionIds.clear();
+    _stopResetTimer?.cancel();
+    _stopResetTimer = null;
+    stoppingSession = false;
     pairedDevices = [];
     currentDeviceId = '';
-    phase = ConnectionPhase.disconnected;
     sessions = [];
+    loadingSessions = false;
+    sessionsFromCache = false;
     workspaces = [];
     activeWorkspace = '';
     selectedWorkspaceFilter = '';
@@ -967,13 +985,36 @@ class BridgeController extends ChangeNotifier {
     activeHasMoreSteps = false;
     loadingOlderSteps = false;
     loadingSessionDetail = false;
-    _workingSessionIds.clear();
     latencyNotifier.value = null;
     pendingApprovals = [];
     pendingChanges = [];
     pendingAttachments = [];
     pendingChangeDiffPath = null;
     pendingChangeDiffContent = '';
+    gitBranch = 'main';
+    workspacePath = '';
+    gitFiles = [];
+    selectedDiffPath = null;
+    selectedDiffContent = '';
+    terminalOutput = '# Удалённый терминал готов к работе';
+    terminalBusy = false;
+  }
+
+  Future<void> disconnect() async {
+    _manualDisconnect = true;
+    ++_connectEpoch;
+    _reconnectAttempts = 0;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    _attemptWatchdogTimer?.cancel();
+    _attemptWatchdogTimer = null;
+    _networkDebounceTimer?.cancel();
+    _networkDebounceTimer = null;
+    _resetMachineSessionState();
+    activeMachine = null;
+    connectingMachineId = null;
+    lastError = null;
+    phase = ConnectionPhase.disconnected;
     _emitChange();
     _closeSocketOnly();
   }

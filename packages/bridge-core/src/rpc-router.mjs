@@ -5,6 +5,45 @@
 import { APPROVAL_MODES, createEnvelope } from '@agy-remote/protocol';
 import { isUserWorkspacePath } from './host-registry.mjs';
 
+const IDEMPOTENT_CHAT_TTL_MS = 120_000;
+const IDEMPOTENT_CHAT_MAX_ENTRIES = 200;
+/** @type {WeakMap<object, Map<string, { promise: Promise<any>, createdAt: number }>>} */
+const _idempotentChatByDriver = new WeakMap();
+
+function runIdempotentChat(driver, reqId, fn) {
+  if (!driver || typeof driver !== 'object' || !reqId) {
+    return fn();
+  }
+  let cache = _idempotentChatByDriver.get(driver);
+  if (!cache) {
+    cache = new Map();
+    _idempotentChatByDriver.set(driver, cache);
+  }
+  const now = Date.now();
+  for (const [key, entry] of cache.entries()) {
+    if (now - entry.createdAt > IDEMPOTENT_CHAT_TTL_MS) {
+      cache.delete(key);
+    }
+  }
+  const existing = cache.get(reqId);
+  if (existing) {
+    return existing.promise;
+  }
+  const promise = Promise.resolve().then(fn);
+  cache.set(reqId, { promise, createdAt: now });
+  if (cache.size > IDEMPOTENT_CHAT_MAX_ENTRIES) {
+    const oldestKey = cache.keys().next().value;
+    if (oldestKey !== undefined) cache.delete(oldestKey);
+  }
+  promise.catch(() => {
+    const current = cache.get(reqId);
+    if (current && current.promise === promise) {
+      cache.delete(reqId);
+    }
+  });
+  return promise;
+}
+
 /**
  * @param {{ type: string, reqId?: string, payload?: Record<string, any> }} env
  * @param {{ deviceName: string, reply: (envelope: any) => void }} ctx
@@ -53,7 +92,9 @@ export async function dispatchClientRpc(env, ctx, services) {
         const workspaceHint =
           (isUserWorkspacePath(sessionWs) ? sessionWs : '') ||
           (isUserWorkspacePath(clientWs) ? clientWs : '');
-        const res = await driver.sendMessage(p.conversationId, p.prompt, { workspaceHint });
+        const res = await runIdempotentChat(driver, reqId, () =>
+          driver.sendMessage(p.conversationId, p.prompt, { workspaceHint }),
+        );
         ctx.reply(
           createEnvelope('chat.send.result', { conversationId: p.conversationId, ...res }, reqId),
         );
@@ -68,7 +109,9 @@ export async function dispatchClientRpc(env, ctx, services) {
       case 'chat.new': {
         approvals?.clearStop?.('');
         brain?.clearSessionStopped?.('');
-        const res = await driver.createConversation(p.prompt, { workspaceHint: p.workspace });
+        const res = await runIdempotentChat(driver, reqId, () =>
+          driver.createConversation(p.prompt, { workspaceHint: p.workspace }),
+        );
         ctx.reply(createEnvelope('chat.send.result', res, reqId));
         if (p.workspace) {
           const sessions = brain ? brain.listSessions(60) : [];

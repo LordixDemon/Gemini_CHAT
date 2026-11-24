@@ -442,6 +442,10 @@ void main() => runApp(const App());
     await tester.tap(find.text('Связать по PIN'));
     await tester.pumpAndSettle();
 
+    expect(find.text('Загрузка чатов…'), findsOneWidget);
+    sock.emit('sessions.list.result', {'sessions': []});
+    await tester.pumpAndSettle();
+
     expect(find.text('Сессий пока нет'), findsOneWidget);
 
     // Tap "Новый" button -> switches to empty new Chat hero
@@ -1153,4 +1157,57 @@ void main() => runApp(const App());
 
     ctrl.dispose();
   });
+
+  testWidgets('SessionsView shows clear connecting state and connection error actions when unreachable', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final slowReady = Completer<void>();
+    final ctrl = BridgeController(
+      httpClient: MockClient((_) async => http.Response('{"ok":true}', 200)),
+      socketFactory: (uri) => _FailingOrSlowSocket(readyFuture: slowReady.future),
+    );
+    await ctrl.init();
+
+    const m = SavedMachine(
+      machineId: 'mach_err',
+      machineName: 'Studio-Mac.local',
+      lanUrl: 'http://192.168.1.55:7443',
+      cloudflareUrl: '',
+      sessionId: 'mach_err',
+      deviceToken: 'tok_err',
+      lastConnectedAtMs: 1000,
+    );
+    final connectFut = ctrl.connectToMachine(m);
+
+    await tester.pumpWidget(AntigravityRemoteApp(controller: ctrl));
+    await tester.pump();
+    expect(find.text('Подключение к Studio-Mac…'), findsOneWidget);
+
+    slowReady.completeError(Exception('refused'));
+    await connectFut;
+    await tester.pump();
+
+    expect(find.text('Не удалось подключиться к Studio-Mac'), findsOneWidget);
+    expect(find.text('Повторить'), findsOneWidget);
+    expect(find.text('Выбрать другой ПК'), findsOneWidget);
+
+    ctrl.dispose();
+  });
+}
+
+class _FailingOrSlowSocket implements RpcSocketTransport {
+  final Future<void> readyFuture;
+  final _sc = StreamController<dynamic>.broadcast();
+  _FailingOrSlowSocket({required this.readyFuture});
+
+  @override
+  Future<void> get ready => readyFuture;
+
+  @override
+  Stream<dynamic> get stream => _sc.stream;
+
+  @override
+  void send(String data) {}
+
+  @override
+  Future<void> close() async {}
 }

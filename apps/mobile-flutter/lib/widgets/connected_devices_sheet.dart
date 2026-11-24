@@ -100,6 +100,11 @@ class _ConnectedDevicesSheetBody extends StatelessWidget {
           machine?.machineName ?? 'Antigravity Mac',
         );
         final isLive = controller.phase == ConnectionPhase.connected;
+        final hasConnError =
+            !isLive && controller.lastError != null && controller.lastError!.isNotEmpty;
+        final statusColor = isLive
+            ? TelemetryColors.live
+            : (hasConnError ? TelemetryColors.danger : TelemetryColors.warn);
         final otherMachines = controller.savedMachines
             .where((m) => m.machineId != machine?.machineId)
             .toList();
@@ -158,9 +163,7 @@ class _ConnectedDevicesSheetBody extends StatelessWidget {
                         color: TelemetryColors.bgElevated,
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
-                          color: isLive
-                              ? TelemetryColors.live.withValues(alpha: 0.45)
-                              : TelemetryColors.warn.withValues(alpha: 0.45),
+                          color: statusColor.withValues(alpha: 0.45),
                         ),
                       ),
                       child: Column(
@@ -172,14 +175,13 @@ class _ConnectedDevicesSheetBody extends StatelessWidget {
                                 width: 38,
                                 height: 38,
                                 decoration: BoxDecoration(
-                                  color: (isLive ? TelemetryColors.live : TelemetryColors.warn)
-                                      .withValues(alpha: 0.14),
+                                  color: statusColor.withValues(alpha: 0.14),
                                   borderRadius: BorderRadius.circular(11),
                                 ),
                                 child: Icon(
                                   Icons.laptop_mac_rounded,
                                   size: 20,
-                                  color: isLive ? TelemetryColors.live : TelemetryColors.warn,
+                                  color: statusColor,
                                 ),
                               ),
                               const SizedBox(width: 11),
@@ -204,13 +206,13 @@ class _ConnectedDevicesSheetBody extends StatelessWidget {
                                         return Text(
                                           isLive
                                               ? '${controller.activeTransport}$pingStr • Подключён'
-                                              : 'Переподключение…',
+                                              : (hasConnError
+                                                    ? 'Ошибка подключения'
+                                                    : 'Подключение…'),
                                           style: TextStyle(
                                             fontSize: 12,
                                             fontWeight: FontWeight.w600,
-                                            color: isLive
-                                                ? TelemetryColors.live
-                                                : TelemetryColors.warn,
+                                            color: statusColor,
                                           ),
                                         );
                                       },
@@ -229,6 +231,18 @@ class _ConnectedDevicesSheetBody extends StatelessWidget {
                               ),
                             ],
                           ),
+                          if (hasConnError) ...[
+                            const SizedBox(height: 8),
+                            Text(
+                              controller.lastError!,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                color: Color(0xFFFECDD3),
+                              ),
+                            ),
+                          ],
                           if (machine != null &&
                               (machine.lanUrl.isNotEmpty || machine.cloudflareUrl.isNotEmpty)) ...[
                             const SizedBox(height: 10),
